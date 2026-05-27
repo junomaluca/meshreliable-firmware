@@ -316,7 +316,6 @@ void printInfo()
 #ifndef PIO_UNIT_TESTING
 void setup()
 {
-
     // initialize power HAL layer as early as possible
     powerHAL_init();
 

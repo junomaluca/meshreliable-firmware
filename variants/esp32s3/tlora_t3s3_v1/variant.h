@@ -11,6 +11,8 @@
 #define I2C_SDA 18 // I2C pins for this board
 #define I2C_SCL 17
 
+// Secondary I2C bus (upstream default: GPIO 43/44)
+// MVSR RTC (PCF85063) is on GPIO 42/45 — handled explicitly when needed.
 #define I2C_SDA1 43
 #define I2C_SCL1 44
 
@@ -97,5 +99,3 @@
 #endif
 #endif
 
-#define HAS_SDCARD // Have SPI interface SD card slot
-#define SDCARD_USE_SPI1
