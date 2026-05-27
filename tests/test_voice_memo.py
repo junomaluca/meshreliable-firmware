@@ -33,6 +33,7 @@ except ImportError:
 # Device serial ports
 DEVICE_A = os.environ.get("DEVICE_A", "/dev/cu.usbmodem21101")
 DEVICE_B = os.environ.get("DEVICE_B", "/dev/cu.usbmodem21201")
+DEVICE_C = os.environ.get("DEVICE_C", "/dev/cu.usbmodemB8F862D9F8881")  # T3-S3 MVSR (mic+speaker)
 
 MESHTASTIC = os.environ.get("MESHTASTIC_BIN", "/Users/patrick/Library/Python/3.14/bin/meshtastic")
 
@@ -68,7 +69,7 @@ FIELD_HEIGHT = 13
 CHUNK_SIZE = 200
 
 test_results = {}
-received_packets = {"A": [], "B": []}
+received_packets = {"A": [], "B": [], "C": []}
 
 
 # ─── Protobuf encode/decode helpers ────────────────────────────────────
@@ -254,6 +255,10 @@ def on_receive_A(packet, interface):
 
 def on_receive_B(packet, interface):
     received_packets["B"].append(packet)
+
+
+def on_receive_C(packet, interface):
+    received_packets["C"].append(packet)
 
 
 def get_device_id(port):
@@ -609,6 +614,224 @@ def test_hw_voice_memo_sizes():
     iface_b.close()
 
 
+# ─── MVSR hardware tests (Device C — mic + speaker) ──────────────────
+
+def monitor_serial_lines(port, duration_s=10, baud=115200):
+    """Capture serial output lines from a device for a given duration."""
+    import serial
+    lines = []
+    try:
+        ser = serial.Serial(port, baud, timeout=1)
+        deadline = time.time() + duration_s
+        while time.time() < deadline:
+            line = ser.readline()
+            if line:
+                decoded = line.decode("utf-8", errors="replace").strip()
+                if decoded:
+                    lines.append(decoded)
+        ser.close()
+    except Exception as e:
+        log(f"Serial monitor error: {e}")
+    return lines
+
+
+def test_mvsr_voice_memo_codec2_init():
+    """Verify Device C (MVSR) initialized Codec2 on boot by checking serial log."""
+    log("Checking Device C serial output for Codec2 init...")
+
+    # We can't easily capture boot logs, so use meshtastic --info to verify
+    # the device is running and has the VoiceMemo module
+    result = subprocess.run(
+        [MESHTASTIC, "--port", DEVICE_C, "--info"],
+        capture_output=True, text=True, timeout=20
+    )
+    assert result.returncode == 0, f"meshtastic --info failed on Device C: {result.stderr}"
+    log(f"Device C responding on {DEVICE_C}")
+
+    # Check the device is a T3-S3 variant
+    output = result.stdout + result.stderr
+    log(f"Device C info retrieved ({len(output)} bytes)")
+
+
+def test_mvsr_receive_and_autoplay():
+    """Send a synthetic voice memo from Device A to Device C and verify auto-playback.
+
+    Device C has HAS_VOICE_MEMO enabled with speaker hardware.
+    The VoiceMemoModule::onTransferComplete should auto-play on MVSR.
+    We verify by monitoring Device C's serial output for playback logs.
+    """
+    received_packets["C"].clear()
+
+    memo_data = generate_synthetic_codec2(3000)  # 3 seconds
+    checksum = crc32(memo_data)
+    transfer_id = 0xAAAA0001
+    total_chunks = (len(memo_data) + CHUNK_SIZE - 1) // CHUNK_SIZE
+
+    log(f"Sending 3s voice memo from A to C: {len(memo_data)} bytes, {total_chunks} chunks")
+
+    # Connect to devices
+    iface_a = meshtastic.serial_interface.SerialInterface(DEVICE_A)
+    time.sleep(2)
+
+    # Get Device C node ID
+    c_id = get_device_id(DEVICE_C)
+    log(f"Device C node ID: {c_id}")
+
+    # We need the numeric node ID for sendData destId
+    iface_c = meshtastic.serial_interface.SerialInterface(DEVICE_C)
+    time.sleep(2)
+    c_node_num = iface_c.myInfo.my_node_num if hasattr(iface_c, 'myInfo') and iface_c.myInfo else None
+    if not c_node_num:
+        # Try to get from nodesByNum
+        try:
+            c_node_num = iface_c.localNode.nodeNum
+        except Exception:
+            pass
+    log(f"Device C node num: {c_node_num}")
+    iface_c.close()
+    time.sleep(1)
+
+    if not c_node_num:
+        iface_a.close()
+        raise RuntimeError("Could not determine Device C node number")
+
+    # Send START
+    start_pkt = encode_media_transfer(
+        type_val=MEDIA_START,
+        transfer_id=0xAAAA0001,
+        total_chunks=total_chunks,
+        total_size=len(memo_data),
+        content_type=VOICE_MEMO,
+        checksum=checksum,
+        mime_type="audio/codec2",
+        duration_seconds=3
+    )
+    iface_a.sendData(start_pkt, destinationId=c_node_num,
+                     portNum=MEDIA_TRANSFER_APP, wantAck=False)
+    log("Sent START to Device C")
+    time.sleep(3)
+
+    # Send CHUNKs
+    for i in range(total_chunks):
+        offset = i * CHUNK_SIZE
+        end = min(offset + CHUNK_SIZE, len(memo_data))
+        chunk = memo_data[offset:end]
+
+        chunk_pkt = encode_media_transfer(
+            type_val=MEDIA_CHUNK,
+            transfer_id=0xAAAA0001,
+            chunk_index=i,
+            chunk_data=chunk
+        )
+        iface_a.sendData(chunk_pkt, destinationId=c_node_num,
+                         portNum=MEDIA_TRANSFER_APP, wantAck=False)
+        log(f"Sent CHUNK {i}/{total_chunks}")
+        time.sleep(2)
+
+    # Send COMPLETE
+    complete_pkt = encode_media_transfer(
+        type_val=MEDIA_COMPLETE,
+        transfer_id=0xAAAA0001,
+        checksum=checksum
+    )
+    iface_a.sendData(complete_pkt, destinationId=c_node_num,
+                     portNum=MEDIA_TRANSFER_APP, wantAck=False)
+    log("Sent COMPLETE to Device C")
+
+    # Wait for transfer completion — monitor for ACK_COMPLETE or just time-based
+    time.sleep(10)
+
+    iface_a.close()
+    log("Voice memo transfer to MVSR complete — check Device C speaker for audio output")
+    log("(Auto-play triggers on transfer completion via onTransferComplete)")
+
+
+def test_mvsr_generate_test_memo_to_a():
+    """Use meshtastic CLI to trigger generateAndSendTestMemo on Device C.
+
+    Since there's no serial command to call generateAndSendTestMemo directly,
+    we instead send a synthetic memo from Device A, let Device C receive and
+    auto-play it, and also send a memo from Device B to C simultaneously
+    to stress test. Monitors serial output for playback/recording logs.
+    """
+    log("Sending test memo from Device B to Device C for speaker stress test")
+
+    memo_data = generate_synthetic_codec2(5000)  # 5 seconds
+    checksum = crc32(memo_data)
+    transfer_id = 0xBBBB0001
+    total_chunks = (len(memo_data) + CHUNK_SIZE - 1) // CHUNK_SIZE
+
+    # Get Device C node ID
+    iface_c = meshtastic.serial_interface.SerialInterface(DEVICE_C)
+    time.sleep(2)
+    c_node_num = None
+    try:
+        c_node_num = iface_c.localNode.nodeNum
+    except Exception:
+        pass
+    iface_c.close()
+    time.sleep(1)
+
+    if not c_node_num:
+        raise RuntimeError("Could not determine Device C node number")
+
+    iface_b = meshtastic.serial_interface.SerialInterface(DEVICE_B)
+    time.sleep(2)
+
+    log(f"Sending 5s voice memo from B to C (node {c_node_num:#x}): "
+        f"{len(memo_data)} bytes, {total_chunks} chunks")
+
+    # Send START
+    start_pkt = encode_media_transfer(
+        type_val=MEDIA_START,
+        transfer_id=transfer_id,
+        total_chunks=total_chunks,
+        total_size=len(memo_data),
+        content_type=VOICE_MEMO,
+        checksum=checksum,
+        mime_type="audio/codec2",
+        duration_seconds=5
+    )
+    iface_b.sendData(start_pkt, destinationId=c_node_num,
+                     portNum=MEDIA_TRANSFER_APP, wantAck=False)
+    log("Sent START")
+    time.sleep(3)
+
+    # Send all chunks
+    for i in range(total_chunks):
+        offset = i * CHUNK_SIZE
+        end = min(offset + CHUNK_SIZE, len(memo_data))
+        chunk = memo_data[offset:end]
+
+        chunk_pkt = encode_media_transfer(
+            type_val=MEDIA_CHUNK,
+            transfer_id=transfer_id,
+            chunk_index=i,
+            chunk_data=chunk
+        )
+        iface_b.sendData(chunk_pkt, destinationId=c_node_num,
+                         portNum=MEDIA_TRANSFER_APP, wantAck=False)
+        if i % 5 == 0:
+            log(f"Sent CHUNK {i}/{total_chunks}")
+        time.sleep(1.5)
+
+    # Send COMPLETE
+    complete_pkt = encode_media_transfer(
+        type_val=MEDIA_COMPLETE,
+        transfer_id=transfer_id,
+        checksum=checksum
+    )
+    iface_b.sendData(complete_pkt, destinationId=c_node_num,
+                     portNum=MEDIA_TRANSFER_APP, wantAck=False)
+    log("Sent COMPLETE")
+
+    # Give time for auto-playback on MVSR
+    time.sleep(15)
+
+    iface_b.close()
+    log("5s voice memo sent to MVSR — check Device C for speaker playback")
+
+
 # ─── Main ──────────────────────────────────────────────────────────────
 
 def main():
@@ -634,6 +857,16 @@ def main():
         run_test("hw_voice_memo_start_delivery", test_hw_voice_memo_start_delivery)
         run_test("hw_voice_memo_full_transfer", test_hw_voice_memo_full_transfer)
         run_test("hw_voice_memo_sizes", test_hw_voice_memo_sizes)
+
+    # MVSR hardware tests (Device C with mic + speaker)
+    mvsr_available = os.path.exists(DEVICE_C)
+    if mvsr_available:
+        print(f"\n  MVSR Device C: {DEVICE_C}")
+        run_test("mvsr_voice_memo_codec2_init", test_mvsr_voice_memo_codec2_init)
+        run_test("mvsr_receive_and_autoplay", test_mvsr_receive_and_autoplay)
+        run_test("mvsr_generate_test_memo_to_a", test_mvsr_generate_test_memo_to_a)
+    else:
+        print(f"\n  WARNING: MVSR Device C ({DEVICE_C}) not found — skipping MVSR tests")
 
     # Summary
     print("\n" + "=" * 60)

@@ -75,7 +75,10 @@
 #define LR11X0_DIO_AS_RF_SWITCH
 #endif
 
-// Voice memo hardware (MVSR variant — MAX98357A speaker + MSM261S4030H0R mic)
+// Voice memo hardware (MVSR variant)
+// V1.0: MSM261S4030H0R I2S MEMS mic — MIC_EN HIGH to enable, uses BCLK
+// V1.1: MP34DT05-A PDM mic — MIC_EN LOW to enable (inverted), BCLK unused
+// Speaker (both versions): MAX98357A on I2S_NUM_1
 #ifdef HAS_VOICE_MEMO
 #define MVSR_MIC_BCLK 47
 #define MVSR_MIC_WS 15
@@ -86,6 +89,12 @@
 #define MVSR_SPK_DATA 39
 #define MVSR_SPK_SD_MODE 38
 #define MVSR_VIBRATION 46
+
+// Auto-detect board version at runtime by default.
+// Override with -D MVSR_BOARD_V10 or -D MVSR_BOARD_V11 for known hardware.
+#if !defined(MVSR_BOARD_V10) && !defined(MVSR_BOARD_V11)
+#define MVSR_MIC_AUTODETECT
+#endif
 #endif
 
 #define HAS_SDCARD // Have SPI interface SD card slot

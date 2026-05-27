@@ -66,15 +66,21 @@ class VoiceMemoModule : private concurrency::OSThread
     int16_t *pcmBuffer = nullptr;
 
 #ifdef HAS_VOICE_MEMO
+    enum class MicMode { I2S_STANDARD, PDM };
+    MicMode micMode = MicMode::I2S_STANDARD;
     bool micInitialized = false;
     bool spkInitialized = false;
+    bool micEnableInverted = false; // V1.1 PDM board has inverted MIC_EN
 
+    bool initMicI2S();
+    bool initMicPDM();
     void initMic();
     void deinitMic();
     void initSpeaker();
     void deinitSpeaker();
     bool captureAndEncodeFrame();
     bool decodeAndPlayFrame();
+    void setMicEnable(bool enable);
 #endif
 
     void initCodec2();

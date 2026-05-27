@@ -81,14 +81,19 @@ void VoiceMemoModule::deinitCodec2()
 
 #ifdef HAS_VOICE_MEMO
 
-void VoiceMemoModule::initMic()
+void VoiceMemoModule::setMicEnable(bool enable)
 {
-    if (micInitialized) return;
-
     pinMode(MVSR_MIC_EN, OUTPUT);
-    digitalWrite(MVSR_MIC_EN, HIGH);
-    delay(10);
+    // V1.0 (I2S): HIGH=enable, LOW=disable
+    // V1.1 (PDM): LOW=enable (inverted), HIGH=disable
+    if (micEnableInverted)
+        digitalWrite(MVSR_MIC_EN, enable ? LOW : HIGH);
+    else
+        digitalWrite(MVSR_MIC_EN, enable ? HIGH : LOW);
+}
 
+bool VoiceMemoModule::initMicI2S()
+{
     i2s_config_t cfg = {};
     cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX);
     cfg.sample_rate = 8000;
@@ -102,8 +107,8 @@ void VoiceMemoModule::initMic()
 
     esp_err_t err = i2s_driver_install(MVSR_MIC_I2S_PORT, &cfg, 0, NULL);
     if (err != ESP_OK) {
-        LOG_ERROR("VoiceMemo: mic I2S install failed: %d", err);
-        return;
+        LOG_ERROR("VoiceMemo: I2S mic install failed: %d", err);
+        return false;
     }
 
     i2s_pin_config_t pins = {};
@@ -114,15 +119,108 @@ void VoiceMemoModule::initMic()
 
     err = i2s_set_pin(MVSR_MIC_I2S_PORT, &pins);
     if (err != ESP_OK) {
-        LOG_ERROR("VoiceMemo: mic pin config failed: %d", err);
+        LOG_ERROR("VoiceMemo: I2S mic pin config failed: %d", err);
         i2s_driver_uninstall(MVSR_MIC_I2S_PORT);
-        return;
+        return false;
     }
 
     i2s_start(MVSR_MIC_I2S_PORT);
+    return true;
+}
+
+bool VoiceMemoModule::initMicPDM()
+{
+    i2s_config_t cfg = {};
+    cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM);
+    cfg.sample_rate = 8000;
+    cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+    cfg.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+    cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+    cfg.intr_alloc_flags = 0;
+    cfg.dma_buf_count = 8;
+    cfg.dma_buf_len = samplesPerFrame;
+    cfg.use_apll = false;
+
+    esp_err_t err = i2s_driver_install(MVSR_MIC_I2S_PORT, &cfg, 0, NULL);
+    if (err != ESP_OK) {
+        LOG_ERROR("VoiceMemo: PDM mic install failed: %d", err);
+        return false;
+    }
+
+    // PDM mode: WS pin = CLK, DATA pin = data in, BCLK unused
+    i2s_pin_config_t pins = {};
+    pins.bck_io_num = I2S_PIN_NO_CHANGE;
+    pins.ws_io_num = MVSR_MIC_WS;
+    pins.data_out_num = I2S_PIN_NO_CHANGE;
+    pins.data_in_num = MVSR_MIC_DATA;
+
+    err = i2s_set_pin(MVSR_MIC_I2S_PORT, &pins);
+    if (err != ESP_OK) {
+        LOG_ERROR("VoiceMemo: PDM mic pin config failed: %d", err);
+        i2s_driver_uninstall(MVSR_MIC_I2S_PORT);
+        return false;
+    }
+
+    i2s_start(MVSR_MIC_I2S_PORT);
+    return true;
+}
+
+void VoiceMemoModule::initMic()
+{
+    if (micInitialized) return;
+
+#ifdef MVSR_BOARD_V11
+    // Forced V1.1 PDM mode
+    micMode = MicMode::PDM;
+    micEnableInverted = true;
+#elif defined(MVSR_BOARD_V10)
+    // Forced V1.0 I2S mode
+    micMode = MicMode::I2S_STANDARD;
+    micEnableInverted = false;
+#elif defined(MVSR_MIC_AUTODETECT)
+    // Auto-detect: try I2S first (V1.0). If mic reads return only silence/noise
+    // after initialization, we'll detect PDM on subsequent frames.
+    // Default to I2S (V1.0) for initial attempt.
+    micMode = MicMode::I2S_STANDARD;
+    micEnableInverted = false;
+#endif
+
+    setMicEnable(true);
+    delay(10);
+
+    bool ok;
+    if (micMode == MicMode::PDM) {
+        ok = initMicPDM();
+    } else {
+        ok = initMicI2S();
+    }
+
+    if (!ok) {
+#ifdef MVSR_MIC_AUTODETECT
+        // I2S failed — try PDM (V1.1 board)
+        if (micMode == MicMode::I2S_STANDARD) {
+            LOG_WARN("VoiceMemo: I2S mic failed, trying PDM (V1.1)");
+            micMode = MicMode::PDM;
+            micEnableInverted = true;
+            setMicEnable(true);
+            delay(10);
+            ok = initMicPDM();
+        }
+        if (!ok) {
+            LOG_ERROR("VoiceMemo: Both I2S and PDM mic init failed");
+            setMicEnable(false);
+            return;
+        }
+#else
+        setMicEnable(false);
+        return;
+#endif
+    }
+
     micInitialized = true;
-    LOG_INFO("VoiceMemo: Mic initialized (BCLK=%d WS=%d DATA=%d EN=%d)",
-             MVSR_MIC_BCLK, MVSR_MIC_WS, MVSR_MIC_DATA, MVSR_MIC_EN);
+    LOG_INFO("VoiceMemo: Mic initialized — mode=%s, WS=%d, DATA=%d, EN=%d (inverted=%d)",
+             micMode == MicMode::PDM ? "PDM" : "I2S",
+             MVSR_MIC_WS, MVSR_MIC_DATA, MVSR_MIC_EN, micEnableInverted);
 }
 
 void VoiceMemoModule::deinitMic()
@@ -130,7 +228,7 @@ void VoiceMemoModule::deinitMic()
     if (!micInitialized) return;
     i2s_stop(MVSR_MIC_I2S_PORT);
     i2s_driver_uninstall(MVSR_MIC_I2S_PORT);
-    digitalWrite(MVSR_MIC_EN, LOW);
+    setMicEnable(false);
     micInitialized = false;
 }
 
