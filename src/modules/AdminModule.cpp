@@ -1062,6 +1062,11 @@ bool AdminModule::handleSetModuleConfig(const meshtastic_ModuleConfig &c)
         moduleConfig.media_transfer = c.payload_variant.media_transfer;
         shouldReboot = false;
         break;
+    case meshtastic_ModuleConfig_cross_band_tag:
+        moduleConfig.has_cross_band = true;
+        moduleConfig.cross_band = c.payload_variant.cross_band;
+        shouldReboot = false;
+        break;
     }
     saveChanges(SEGMENT_MODULECONFIG, shouldReboot);
     return true;
@@ -1267,6 +1272,11 @@ void AdminModule::handleGetModuleConfig(const meshtastic_MeshPacket &req, const 
             configName = "Media Transfer";
             res.get_module_config_response.which_payload_variant = meshtastic_ModuleConfig_media_transfer_tag;
             res.get_module_config_response.payload_variant.media_transfer = moduleConfig.media_transfer;
+            break;
+        case meshtastic_AdminMessage_ModuleConfigType_CROSSBAND_CONFIG:
+            configName = "Cross-Band";
+            res.get_module_config_response.which_payload_variant = meshtastic_ModuleConfig_cross_band_tag;
+            res.get_module_config_response.payload_variant.cross_band = moduleConfig.cross_band;
             break;
         }
         LOG_INFO("Get module config: %s", configName);

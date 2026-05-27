@@ -89,7 +89,9 @@ typedef enum _meshtastic_AdminMessage_ModuleConfigType {
     /* Acknowledged group messaging module config */
     meshtastic_AdminMessage_ModuleConfigType_GROUPMESSAGE_CONFIG = 17,
     /* Media transfer module config */
-    meshtastic_AdminMessage_ModuleConfigType_MEDIATRANSFER_CONFIG = 18
+    meshtastic_AdminMessage_ModuleConfigType_MEDIATRANSFER_CONFIG = 18,
+    /* Cross-band awareness and bridging module config */
+    meshtastic_AdminMessage_ModuleConfigType_CROSSBAND_CONFIG = 19
 } meshtastic_AdminMessage_ModuleConfigType;
 
 typedef enum _meshtastic_AdminMessage_BackupLocation {
@@ -491,8 +493,8 @@ extern "C" {
 #define _meshtastic_AdminMessage_ConfigType_ARRAYSIZE ((meshtastic_AdminMessage_ConfigType)(meshtastic_AdminMessage_ConfigType_DEVICEUI_CONFIG+1))
 
 #define _meshtastic_AdminMessage_ModuleConfigType_MIN meshtastic_AdminMessage_ModuleConfigType_MQTT_CONFIG
-#define _meshtastic_AdminMessage_ModuleConfigType_MAX meshtastic_AdminMessage_ModuleConfigType_MEDIATRANSFER_CONFIG
-#define _meshtastic_AdminMessage_ModuleConfigType_ARRAYSIZE ((meshtastic_AdminMessage_ModuleConfigType)(meshtastic_AdminMessage_ModuleConfigType_MEDIATRANSFER_CONFIG+1))
+#define _meshtastic_AdminMessage_ModuleConfigType_MAX meshtastic_AdminMessage_ModuleConfigType_CROSSBAND_CONFIG
+#define _meshtastic_AdminMessage_ModuleConfigType_ARRAYSIZE ((meshtastic_AdminMessage_ModuleConfigType)(meshtastic_AdminMessage_ModuleConfigType_CROSSBAND_CONFIG+1))
 
 #define _meshtastic_AdminMessage_BackupLocation_MIN meshtastic_AdminMessage_BackupLocation_FLASH
 #define _meshtastic_AdminMessage_BackupLocation_MAX meshtastic_AdminMessage_BackupLocation_SD

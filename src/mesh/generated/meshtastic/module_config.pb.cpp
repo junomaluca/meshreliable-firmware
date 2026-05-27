@@ -69,6 +69,9 @@ PB_BIND(meshtastic_ModuleConfig_GroupMessageConfig, meshtastic_ModuleConfig_Grou
 PB_BIND(meshtastic_ModuleConfig_MediaTransferConfig, meshtastic_ModuleConfig_MediaTransferConfig, AUTO)
 
 
+PB_BIND(meshtastic_ModuleConfig_CrossBandConfig, meshtastic_ModuleConfig_CrossBandConfig, AUTO)
+
+
 PB_BIND(meshtastic_RemoteHardwarePin, meshtastic_RemoteHardwarePin, AUTO)
 
 

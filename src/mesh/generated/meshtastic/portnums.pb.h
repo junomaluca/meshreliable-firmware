@@ -174,6 +174,9 @@ typedef enum _meshtastic_PortNum {
     /* Media transfer protocol.
  ENCODING: Protobuf */
     meshtastic_PortNum_MEDIA_TRANSFER_APP = 259,
+    /* Cross-band communication protocol.
+ ENCODING: Protobuf */
+    meshtastic_PortNum_CROSS_BAND_APP = 260,
     /* Currently we limit port nums to no higher than this value */
     meshtastic_PortNum_MAX = 511
 } meshtastic_PortNum;

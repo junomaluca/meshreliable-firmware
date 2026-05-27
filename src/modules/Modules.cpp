@@ -44,6 +44,7 @@
 #include "modules/TextMessageModule.h"
 #include "modules/GroupMessageModule.h"
 #include "modules/MediaTransferModule.h"
+#include "modules/CrossBandModule.h"
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
 #include "modules/TraceRouteModule.h"
 #endif
@@ -152,6 +153,8 @@ void setupModules()
     groupMessageModule = new GroupMessageModule();
     // Media transfer — always instantiated, module checks enabled flag in runOnce()
     mediaTransferModule = new MediaTransferModule();
+    // Cross-band awareness — always instantiated, module checks enabled flag in runOnce()
+    crossBandModule = new CrossBandModule();
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
     traceRouteModule = new TraceRouteModule();
 #endif

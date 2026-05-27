@@ -105,6 +105,9 @@ typedef struct _meshtastic_LocalModuleConfig {
     /* Media Transfer Config */
     bool has_media_transfer;
     meshtastic_ModuleConfig_MediaTransferConfig media_transfer;
+    /* Cross-Band Bridging Config */
+    bool has_cross_band;
+    meshtastic_ModuleConfig_CrossBandConfig cross_band;
 } meshtastic_LocalModuleConfig;
 
 
@@ -148,6 +151,7 @@ extern "C" {
 #define meshtastic_LocalModuleConfig_reliable_message_tag 18
 #define meshtastic_LocalModuleConfig_group_message_tag 19
 #define meshtastic_LocalModuleConfig_media_transfer_tag 20
+#define meshtastic_LocalModuleConfig_cross_band_tag    21
 
 /* Struct field encoding specification for nanopb */
 #define meshtastic_LocalConfig_FIELDLIST(X, a) \
@@ -191,7 +195,8 @@ X(a, STATIC,   OPTIONAL, MESSAGE,  traffic_management,  16) \
 X(a, STATIC,   OPTIONAL, MESSAGE,  tak,              17) \
 X(a, STATIC,   OPTIONAL, MESSAGE,  reliable_message, 18) \
 X(a, STATIC,   OPTIONAL, MESSAGE,  group_message,    19) \
-X(a, STATIC,   OPTIONAL, MESSAGE,  media_transfer,   20)
+X(a, STATIC,   OPTIONAL, MESSAGE,  media_transfer,   20) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  cross_band,       21)
 #define meshtastic_LocalModuleConfig_CALLBACK NULL
 #define meshtastic_LocalModuleConfig_DEFAULT NULL
 #define meshtastic_LocalModuleConfig_mqtt_MSGTYPE meshtastic_ModuleConfig_MQTTConfig
@@ -213,6 +218,7 @@ X(a, STATIC,   OPTIONAL, MESSAGE,  media_transfer,   20)
 #define meshtastic_LocalModuleConfig_reliable_message_MSGTYPE meshtastic_ModuleConfig_ReliableMessageConfig
 #define meshtastic_LocalModuleConfig_group_message_MSGTYPE meshtastic_ModuleConfig_GroupMessageConfig
 #define meshtastic_LocalModuleConfig_media_transfer_MSGTYPE meshtastic_ModuleConfig_MediaTransferConfig
+#define meshtastic_LocalModuleConfig_cross_band_MSGTYPE meshtastic_ModuleConfig_CrossBandConfig
 
 extern const pb_msgdesc_t meshtastic_LocalConfig_msg;
 extern const pb_msgdesc_t meshtastic_LocalModuleConfig_msg;
@@ -224,7 +230,7 @@ extern const pb_msgdesc_t meshtastic_LocalModuleConfig_msg;
 /* Maximum encoded size of messages (where known) */
 #define MESHTASTIC_MESHTASTIC_LOCALONLY_PB_H_MAX_SIZE meshtastic_LocalModuleConfig_size
 #define meshtastic_LocalConfig_size              757
-#define meshtastic_LocalModuleConfig_size        896
+#define meshtastic_LocalModuleConfig_size        942
 
 #ifdef __cplusplus
 } /* extern "C" */

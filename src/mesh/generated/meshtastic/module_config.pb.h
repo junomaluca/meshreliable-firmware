@@ -503,6 +503,22 @@ typedef struct _meshtastic_ModuleConfig_MediaTransferConfig {
     bool prefer_24ghz;
 } meshtastic_ModuleConfig_MediaTransferConfig;
 
+/* Cross-Band Bridging Module configuration */
+typedef struct _meshtastic_ModuleConfig_CrossBandConfig {
+    /* Enable the Cross-Band module */
+    bool enabled;
+    /* Operating mode for cross-band bridging */
+    uint32_t mode;
+    /* MQTT topic prefix for cross-band messages */
+    char mqtt_topic_prefix[32];
+    /* Maximum TTL for bridged messages */
+    uint32_t max_bridge_ttl;
+    /* Deduplication window in minutes */
+    uint32_t dedup_window_minutes;
+    /* Duty cycle percentage for sub-GHz transmissions */
+    uint32_t duty_cycle_sub_ghz_percent;
+} meshtastic_ModuleConfig_CrossBandConfig;
+
 /* A GPIO pin definition for remote hardware module */
 typedef struct _meshtastic_RemoteHardwarePin {
     /* GPIO Pin number (must match Arduino) */
@@ -566,6 +582,8 @@ typedef struct _meshtastic_ModuleConfig {
         meshtastic_ModuleConfig_GroupMessageConfig group_message;
         /* Media transfer module configuration */
         meshtastic_ModuleConfig_MediaTransferConfig media_transfer;
+        /* Cross-band bridging module configuration */
+        meshtastic_ModuleConfig_CrossBandConfig cross_band;
     } payload_variant;
 } meshtastic_ModuleConfig;
 
@@ -651,6 +669,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_ReliableMessageConfig_init_default {0, 0, 0, 0, 0}
 #define meshtastic_ModuleConfig_GroupMessageConfig_init_default {0, 0, 0, 0, 0}
 #define meshtastic_ModuleConfig_MediaTransferConfig_init_default {0, 0, 0, 0, 0, 0}
+#define meshtastic_ModuleConfig_CrossBandConfig_init_default {0, 0, "", 0, 0, 0}
 #define meshtastic_RemoteHardwarePin_init_default {0, "", _meshtastic_RemoteHardwarePinType_MIN}
 #define meshtastic_ModuleConfig_init_zero        {0, {meshtastic_ModuleConfig_MQTTConfig_init_zero}}
 #define meshtastic_ModuleConfig_MQTTConfig_init_zero {0, "", "", "", 0, 0, 0, "", 0, 0, false, meshtastic_ModuleConfig_MapReportSettings_init_zero}
@@ -673,6 +692,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_ReliableMessageConfig_init_zero {0, 0, 0, 0, 0}
 #define meshtastic_ModuleConfig_GroupMessageConfig_init_zero {0, 0, 0, 0, 0}
 #define meshtastic_ModuleConfig_MediaTransferConfig_init_zero {0, 0, 0, 0, 0, 0}
+#define meshtastic_ModuleConfig_CrossBandConfig_init_zero {0, 0, "", 0, 0, 0}
 #define meshtastic_RemoteHardwarePin_init_zero   {0, "", _meshtastic_RemoteHardwarePinType_MIN}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -809,6 +829,12 @@ extern "C" {
 #define meshtastic_ModuleConfig_MediaTransferConfig_voice_max_duration_seconds_tag 4
 #define meshtastic_ModuleConfig_MediaTransferConfig_yield_to_text_tag 5
 #define meshtastic_ModuleConfig_MediaTransferConfig_prefer_24ghz_tag 6
+#define meshtastic_ModuleConfig_CrossBandConfig_enabled_tag 1
+#define meshtastic_ModuleConfig_CrossBandConfig_mode_tag 2
+#define meshtastic_ModuleConfig_CrossBandConfig_mqtt_topic_prefix_tag 3
+#define meshtastic_ModuleConfig_CrossBandConfig_max_bridge_ttl_tag 4
+#define meshtastic_ModuleConfig_CrossBandConfig_dedup_window_minutes_tag 5
+#define meshtastic_ModuleConfig_CrossBandConfig_duty_cycle_sub_ghz_percent_tag 6
 #define meshtastic_RemoteHardwarePin_gpio_pin_tag 1
 #define meshtastic_RemoteHardwarePin_name_tag    2
 #define meshtastic_RemoteHardwarePin_type_tag    3
@@ -834,6 +860,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_reliable_message_tag 17
 #define meshtastic_ModuleConfig_group_message_tag 18
 #define meshtastic_ModuleConfig_media_transfer_tag 19
+#define meshtastic_ModuleConfig_cross_band_tag   20
 
 /* Struct field encoding specification for nanopb */
 #define meshtastic_ModuleConfig_FIELDLIST(X, a) \
@@ -855,7 +882,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,traffic_management,payload_v
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,tak,payload_variant.tak),  16) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,reliable_message,payload_variant.reliable_message),  17) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,group_message,payload_variant.group_message),  18) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,media_transfer,payload_variant.media_transfer),  19)
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,media_transfer,payload_variant.media_transfer),  19) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,cross_band,payload_variant.cross_band),  20)
 #define meshtastic_ModuleConfig_CALLBACK NULL
 #define meshtastic_ModuleConfig_DEFAULT NULL
 #define meshtastic_ModuleConfig_payload_variant_mqtt_MSGTYPE meshtastic_ModuleConfig_MQTTConfig
@@ -877,6 +905,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,media_transfer,payload_varia
 #define meshtastic_ModuleConfig_payload_variant_reliable_message_MSGTYPE meshtastic_ModuleConfig_ReliableMessageConfig
 #define meshtastic_ModuleConfig_payload_variant_group_message_MSGTYPE meshtastic_ModuleConfig_GroupMessageConfig
 #define meshtastic_ModuleConfig_payload_variant_media_transfer_MSGTYPE meshtastic_ModuleConfig_MediaTransferConfig
+#define meshtastic_ModuleConfig_payload_variant_cross_band_MSGTYPE meshtastic_ModuleConfig_CrossBandConfig
 
 #define meshtastic_ModuleConfig_MQTTConfig_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BOOL,     enabled,           1) \
@@ -1096,6 +1125,16 @@ X(a, STATIC,   SINGULAR, BOOL,     prefer_24ghz,      6)
 #define meshtastic_ModuleConfig_MediaTransferConfig_CALLBACK NULL
 #define meshtastic_ModuleConfig_MediaTransferConfig_DEFAULT NULL
 
+#define meshtastic_ModuleConfig_CrossBandConfig_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, BOOL,     enabled,                    1) \
+X(a, STATIC,   SINGULAR, UINT32,   mode,                       2) \
+X(a, STATIC,   SINGULAR, UINT32,   max_bridge_ttl,             4) \
+X(a, STATIC,   SINGULAR, UINT32,   dedup_window_minutes,       5) \
+X(a, STATIC,   SINGULAR, UINT32,   duty_cycle_sub_ghz_percent, 6) \
+X(a, STATIC,   SINGULAR, STRING,   mqtt_topic_prefix,          3)
+#define meshtastic_ModuleConfig_CrossBandConfig_CALLBACK NULL
+#define meshtastic_ModuleConfig_CrossBandConfig_DEFAULT NULL
+
 #define meshtastic_RemoteHardwarePin_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   gpio_pin,          1) \
 X(a, STATIC,   SINGULAR, STRING,   name,              2) \
@@ -1124,6 +1163,7 @@ extern const pb_msgdesc_t meshtastic_ModuleConfig_TAKConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_ReliableMessageConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_GroupMessageConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_MediaTransferConfig_msg;
+extern const pb_msgdesc_t meshtastic_ModuleConfig_CrossBandConfig_msg;
 extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
@@ -1148,6 +1188,7 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_ReliableMessageConfig_fields &meshtastic_ModuleConfig_ReliableMessageConfig_msg
 #define meshtastic_ModuleConfig_GroupMessageConfig_fields &meshtastic_ModuleConfig_GroupMessageConfig_msg
 #define meshtastic_ModuleConfig_MediaTransferConfig_fields &meshtastic_ModuleConfig_MediaTransferConfig_msg
+#define meshtastic_ModuleConfig_CrossBandConfig_fields &meshtastic_ModuleConfig_CrossBandConfig_msg
 #define meshtastic_RemoteHardwarePin_fields &meshtastic_RemoteHardwarePin_msg
 
 /* Maximum encoded size of messages (where known) */
@@ -1169,6 +1210,7 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_ReliableMessageConfig_size 22
 #define meshtastic_ModuleConfig_GroupMessageConfig_size 22
 #define meshtastic_ModuleConfig_MediaTransferConfig_size 24
+#define meshtastic_ModuleConfig_CrossBandConfig_size 42
 #define meshtastic_ModuleConfig_TAKConfig_size   4
 #define meshtastic_ModuleConfig_TelemetryConfig_size 50
 #define meshtastic_ModuleConfig_TrafficManagementConfig_size 52
