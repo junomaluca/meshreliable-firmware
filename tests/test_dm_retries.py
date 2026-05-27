@@ -23,8 +23,8 @@ import re
 from datetime import datetime
 
 # Device serial ports
-DEVICE_A = os.environ.get("DEVICE_A", "/dev/cu.usbmodem10B41DE915BC1")
-DEVICE_B = os.environ.get("DEVICE_B", "/dev/cu.usbmodem10B41DE932841")
+DEVICE_A = os.environ.get("DEVICE_A", "/dev/cu.usbmodem21101")
+DEVICE_B = os.environ.get("DEVICE_B", "/dev/cu.usbmodem21201")
 MESHTASTIC = os.environ.get("MESHTASTIC_BIN", "/Users/patrick/Library/Python/3.14/bin/meshtastic")
 
 # Test configuration

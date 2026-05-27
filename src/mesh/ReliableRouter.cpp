@@ -35,8 +35,12 @@ static meshtastic_ModuleConfig_ReliableMessageConfig getReliableConfig()
 static bool shouldUsePersistentRetry(const meshtastic_MeshPacket *p)
 {
     auto cfg = getReliableConfig();
-    // Must be enabled and must be a unicast (DM) packet with want_ack
-    return cfg.enabled && p->want_ack && !isBroadcast(p->to);
+    // Persistent DM retries are ON by default for unicast packets with want_ack.
+    // To disable, explicitly set enabled=false in the module config.
+    // When the config has never been written, enabled defaults to false (0) in protobuf,
+    // but we treat "never configured" (all zeros) as enabled.
+    bool featureEnabled = cfg.enabled || (!moduleConfig.has_reliable_message);
+    return featureEnabled && p->want_ack && !isBroadcast(p->to);
 }
 
 /**
