@@ -42,6 +42,8 @@
 #include "modules/TrafficManagementModule.h"
 #endif
 #include "modules/TextMessageModule.h"
+#include "modules/GroupMessageModule.h"
+#include "modules/MediaTransferModule.h"
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
 #include "modules/TraceRouteModule.h"
 #endif
@@ -146,6 +148,10 @@ void setupModules()
 #if !MESHTASTIC_EXCLUDE_TEXTMESSAGE
     textMessageModule = new TextMessageModule();
 #endif
+    // Group messaging — always instantiated, module checks enabled flag in runOnce()
+    groupMessageModule = new GroupMessageModule();
+    // Media transfer — always instantiated, module checks enabled flag in runOnce()
+    mediaTransferModule = new MediaTransferModule();
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
     traceRouteModule = new TraceRouteModule();
 #endif

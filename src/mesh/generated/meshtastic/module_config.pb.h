@@ -473,6 +473,36 @@ typedef struct _meshtastic_ModuleConfig_ReliableMessageConfig {
     uint32_t battery_throttle_threshold;
 } meshtastic_ModuleConfig_ReliableMessageConfig;
 
+/* Acknowledged Group Messaging configuration */
+typedef struct _meshtastic_ModuleConfig_GroupMessageConfig {
+    /* Enable acknowledged group messaging */
+    bool enabled;
+    /* Maximum relay duration in hours (default: 24). Range: 1-72. */
+    uint32_t max_relay_duration_hours;
+    /* Enable MQTT bridging for group messages (default: true). */
+    bool enable_mqtt_bridge;
+    /* Maximum number of members per group (default: 32). Range: 2-64. */
+    uint32_t max_members;
+    /* Delay in milliseconds before sending ACK (default: 5000). Range: 1000-30000. */
+    uint32_t ack_aggregation_delay_ms;
+} meshtastic_ModuleConfig_GroupMessageConfig;
+
+/* Media Transfer Module configuration */
+typedef struct _meshtastic_ModuleConfig_MediaTransferConfig {
+    /* Enable the Media Transfer module */
+    bool enabled;
+    /* Chunk size in bytes for media transfers */
+    uint32_t chunk_size_bytes;
+    /* Maximum transfer time in minutes */
+    uint32_t max_transfer_time_minutes;
+    /* Maximum duration in seconds for voice messages */
+    uint32_t voice_max_duration_seconds;
+    /* Yield channel time to text messages when pending */
+    bool yield_to_text;
+    /* Prefer 2.4 GHz band for media transfers when available */
+    bool prefer_24ghz;
+} meshtastic_ModuleConfig_MediaTransferConfig;
+
 /* A GPIO pin definition for remote hardware module */
 typedef struct _meshtastic_RemoteHardwarePin {
     /* GPIO Pin number (must match Arduino) */
@@ -532,6 +562,10 @@ typedef struct _meshtastic_ModuleConfig {
         meshtastic_ModuleConfig_TAKConfig tak;
         /* Persistent DM retry configuration */
         meshtastic_ModuleConfig_ReliableMessageConfig reliable_message;
+        /* Acknowledged group messaging configuration */
+        meshtastic_ModuleConfig_GroupMessageConfig group_message;
+        /* Media transfer module configuration */
+        meshtastic_ModuleConfig_MediaTransferConfig media_transfer;
     } payload_variant;
 } meshtastic_ModuleConfig;
 
@@ -615,6 +649,8 @@ extern "C" {
 #define meshtastic_ModuleConfig_StatusMessageConfig_init_default {""}
 #define meshtastic_ModuleConfig_TAKConfig_init_default {_meshtastic_Team_MIN, _meshtastic_MemberRole_MIN}
 #define meshtastic_ModuleConfig_ReliableMessageConfig_init_default {0, 0, 0, 0, 0}
+#define meshtastic_ModuleConfig_GroupMessageConfig_init_default {0, 0, 0, 0, 0}
+#define meshtastic_ModuleConfig_MediaTransferConfig_init_default {0, 0, 0, 0, 0, 0}
 #define meshtastic_RemoteHardwarePin_init_default {0, "", _meshtastic_RemoteHardwarePinType_MIN}
 #define meshtastic_ModuleConfig_init_zero        {0, {meshtastic_ModuleConfig_MQTTConfig_init_zero}}
 #define meshtastic_ModuleConfig_MQTTConfig_init_zero {0, "", "", "", 0, 0, 0, "", 0, 0, false, meshtastic_ModuleConfig_MapReportSettings_init_zero}
@@ -635,6 +671,8 @@ extern "C" {
 #define meshtastic_ModuleConfig_StatusMessageConfig_init_zero {""}
 #define meshtastic_ModuleConfig_TAKConfig_init_zero {_meshtastic_Team_MIN, _meshtastic_MemberRole_MIN}
 #define meshtastic_ModuleConfig_ReliableMessageConfig_init_zero {0, 0, 0, 0, 0}
+#define meshtastic_ModuleConfig_GroupMessageConfig_init_zero {0, 0, 0, 0, 0}
+#define meshtastic_ModuleConfig_MediaTransferConfig_init_zero {0, 0, 0, 0, 0, 0}
 #define meshtastic_RemoteHardwarePin_init_zero   {0, "", _meshtastic_RemoteHardwarePinType_MIN}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -760,6 +798,17 @@ extern "C" {
 #define meshtastic_ModuleConfig_ReliableMessageConfig_initial_retry_interval_ms_tag 3
 #define meshtastic_ModuleConfig_ReliableMessageConfig_max_retry_interval_ms_tag 4
 #define meshtastic_ModuleConfig_ReliableMessageConfig_battery_throttle_threshold_tag 5
+#define meshtastic_ModuleConfig_GroupMessageConfig_enabled_tag 1
+#define meshtastic_ModuleConfig_GroupMessageConfig_max_relay_duration_hours_tag 2
+#define meshtastic_ModuleConfig_GroupMessageConfig_enable_mqtt_bridge_tag 3
+#define meshtastic_ModuleConfig_GroupMessageConfig_max_members_tag 4
+#define meshtastic_ModuleConfig_GroupMessageConfig_ack_aggregation_delay_ms_tag 5
+#define meshtastic_ModuleConfig_MediaTransferConfig_enabled_tag 1
+#define meshtastic_ModuleConfig_MediaTransferConfig_chunk_size_bytes_tag 2
+#define meshtastic_ModuleConfig_MediaTransferConfig_max_transfer_time_minutes_tag 3
+#define meshtastic_ModuleConfig_MediaTransferConfig_voice_max_duration_seconds_tag 4
+#define meshtastic_ModuleConfig_MediaTransferConfig_yield_to_text_tag 5
+#define meshtastic_ModuleConfig_MediaTransferConfig_prefer_24ghz_tag 6
 #define meshtastic_RemoteHardwarePin_gpio_pin_tag 1
 #define meshtastic_RemoteHardwarePin_name_tag    2
 #define meshtastic_RemoteHardwarePin_type_tag    3
@@ -783,6 +832,8 @@ extern "C" {
 #define meshtastic_ModuleConfig_traffic_management_tag 15
 #define meshtastic_ModuleConfig_tak_tag          16
 #define meshtastic_ModuleConfig_reliable_message_tag 17
+#define meshtastic_ModuleConfig_group_message_tag 18
+#define meshtastic_ModuleConfig_media_transfer_tag 19
 
 /* Struct field encoding specification for nanopb */
 #define meshtastic_ModuleConfig_FIELDLIST(X, a) \
@@ -802,7 +853,9 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,paxcounter,payload_variant.p
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,statusmessage,payload_variant.statusmessage),  14) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,traffic_management,payload_variant.traffic_management),  15) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,tak,payload_variant.tak),  16) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,reliable_message,payload_variant.reliable_message),  17)
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,reliable_message,payload_variant.reliable_message),  17) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,group_message,payload_variant.group_message),  18) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,media_transfer,payload_variant.media_transfer),  19)
 #define meshtastic_ModuleConfig_CALLBACK NULL
 #define meshtastic_ModuleConfig_DEFAULT NULL
 #define meshtastic_ModuleConfig_payload_variant_mqtt_MSGTYPE meshtastic_ModuleConfig_MQTTConfig
@@ -822,6 +875,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,reliable_message,payload_var
 #define meshtastic_ModuleConfig_payload_variant_traffic_management_MSGTYPE meshtastic_ModuleConfig_TrafficManagementConfig
 #define meshtastic_ModuleConfig_payload_variant_tak_MSGTYPE meshtastic_ModuleConfig_TAKConfig
 #define meshtastic_ModuleConfig_payload_variant_reliable_message_MSGTYPE meshtastic_ModuleConfig_ReliableMessageConfig
+#define meshtastic_ModuleConfig_payload_variant_group_message_MSGTYPE meshtastic_ModuleConfig_GroupMessageConfig
+#define meshtastic_ModuleConfig_payload_variant_media_transfer_MSGTYPE meshtastic_ModuleConfig_MediaTransferConfig
 
 #define meshtastic_ModuleConfig_MQTTConfig_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BOOL,     enabled,           1) \
@@ -1022,6 +1077,25 @@ X(a, STATIC,   SINGULAR, UINT32,   battery_throttle_threshold,   5)
 #define meshtastic_ModuleConfig_ReliableMessageConfig_CALLBACK NULL
 #define meshtastic_ModuleConfig_ReliableMessageConfig_DEFAULT NULL
 
+#define meshtastic_ModuleConfig_GroupMessageConfig_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, BOOL,     enabled,           1) \
+X(a, STATIC,   SINGULAR, UINT32,   max_relay_duration_hours,   2) \
+X(a, STATIC,   SINGULAR, BOOL,     enable_mqtt_bridge,   3) \
+X(a, STATIC,   SINGULAR, UINT32,   max_members,       4) \
+X(a, STATIC,   SINGULAR, UINT32,   ack_aggregation_delay_ms,   5)
+#define meshtastic_ModuleConfig_GroupMessageConfig_CALLBACK NULL
+#define meshtastic_ModuleConfig_GroupMessageConfig_DEFAULT NULL
+
+#define meshtastic_ModuleConfig_MediaTransferConfig_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, BOOL,     enabled,           1) \
+X(a, STATIC,   SINGULAR, UINT32,   chunk_size_bytes,  2) \
+X(a, STATIC,   SINGULAR, UINT32,   max_transfer_time_minutes,   3) \
+X(a, STATIC,   SINGULAR, UINT32,   voice_max_duration_seconds,   4) \
+X(a, STATIC,   SINGULAR, BOOL,     yield_to_text,     5) \
+X(a, STATIC,   SINGULAR, BOOL,     prefer_24ghz,      6)
+#define meshtastic_ModuleConfig_MediaTransferConfig_CALLBACK NULL
+#define meshtastic_ModuleConfig_MediaTransferConfig_DEFAULT NULL
+
 #define meshtastic_RemoteHardwarePin_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   gpio_pin,          1) \
 X(a, STATIC,   SINGULAR, STRING,   name,              2) \
@@ -1048,6 +1122,8 @@ extern const pb_msgdesc_t meshtastic_ModuleConfig_AmbientLightingConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_StatusMessageConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_TAKConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_ReliableMessageConfig_msg;
+extern const pb_msgdesc_t meshtastic_ModuleConfig_GroupMessageConfig_msg;
+extern const pb_msgdesc_t meshtastic_ModuleConfig_MediaTransferConfig_msg;
 extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
@@ -1070,6 +1146,8 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_StatusMessageConfig_fields &meshtastic_ModuleConfig_StatusMessageConfig_msg
 #define meshtastic_ModuleConfig_TAKConfig_fields &meshtastic_ModuleConfig_TAKConfig_msg
 #define meshtastic_ModuleConfig_ReliableMessageConfig_fields &meshtastic_ModuleConfig_ReliableMessageConfig_msg
+#define meshtastic_ModuleConfig_GroupMessageConfig_fields &meshtastic_ModuleConfig_GroupMessageConfig_msg
+#define meshtastic_ModuleConfig_MediaTransferConfig_fields &meshtastic_ModuleConfig_MediaTransferConfig_msg
 #define meshtastic_RemoteHardwarePin_fields &meshtastic_RemoteHardwarePin_msg
 
 /* Maximum encoded size of messages (where known) */
@@ -1089,6 +1167,8 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_StatusMessageConfig_size 81
 #define meshtastic_ModuleConfig_StoreForwardConfig_size 24
 #define meshtastic_ModuleConfig_ReliableMessageConfig_size 22
+#define meshtastic_ModuleConfig_GroupMessageConfig_size 22
+#define meshtastic_ModuleConfig_MediaTransferConfig_size 24
 #define meshtastic_ModuleConfig_TAKConfig_size   4
 #define meshtastic_ModuleConfig_TelemetryConfig_size 50
 #define meshtastic_ModuleConfig_TrafficManagementConfig_size 52

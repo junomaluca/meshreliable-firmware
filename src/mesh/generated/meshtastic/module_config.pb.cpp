@@ -63,6 +63,12 @@ PB_BIND(meshtastic_ModuleConfig_TAKConfig, meshtastic_ModuleConfig_TAKConfig, AU
 PB_BIND(meshtastic_ModuleConfig_ReliableMessageConfig, meshtastic_ModuleConfig_ReliableMessageConfig, AUTO)
 
 
+PB_BIND(meshtastic_ModuleConfig_GroupMessageConfig, meshtastic_ModuleConfig_GroupMessageConfig, AUTO)
+
+
+PB_BIND(meshtastic_ModuleConfig_MediaTransferConfig, meshtastic_ModuleConfig_MediaTransferConfig, AUTO)
+
+
 PB_BIND(meshtastic_RemoteHardwarePin, meshtastic_RemoteHardwarePin, AUTO)
 
 

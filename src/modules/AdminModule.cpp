@@ -1049,7 +1049,18 @@ bool AdminModule::handleSetModuleConfig(const meshtastic_ModuleConfig &c)
         LOG_INFO("Set module config: Reliable Message");
         moduleConfig.has_reliable_message = true;
         moduleConfig.reliable_message = c.payload_variant.reliable_message;
-        shouldReboot = false; // No reboot needed for retry config changes
+        shouldReboot = false;
+        break;
+    case meshtastic_ModuleConfig_group_message_tag:
+        LOG_INFO("Set module config: Group Message");
+        moduleConfig.has_group_message = true;
+        moduleConfig.group_message = c.payload_variant.group_message;
+        shouldReboot = false;
+        break;
+    case meshtastic_ModuleConfig_media_transfer_tag:
+        moduleConfig.has_media_transfer = true;
+        moduleConfig.media_transfer = c.payload_variant.media_transfer;
+        shouldReboot = false;
         break;
     }
     saveChanges(SEGMENT_MODULECONFIG, shouldReboot);
@@ -1246,6 +1257,16 @@ void AdminModule::handleGetModuleConfig(const meshtastic_MeshPacket &req, const 
             configName = "Reliable Message";
             res.get_module_config_response.which_payload_variant = meshtastic_ModuleConfig_reliable_message_tag;
             res.get_module_config_response.payload_variant.reliable_message = moduleConfig.reliable_message;
+            break;
+        case meshtastic_AdminMessage_ModuleConfigType_GROUPMESSAGE_CONFIG:
+            configName = "Group Message";
+            res.get_module_config_response.which_payload_variant = meshtastic_ModuleConfig_group_message_tag;
+            res.get_module_config_response.payload_variant.group_message = moduleConfig.group_message;
+            break;
+        case meshtastic_AdminMessage_ModuleConfigType_MEDIATRANSFER_CONFIG:
+            configName = "Media Transfer";
+            res.get_module_config_response.which_payload_variant = meshtastic_ModuleConfig_media_transfer_tag;
+            res.get_module_config_response.payload_variant.media_transfer = moduleConfig.media_transfer;
             break;
         }
         LOG_INFO("Get module config: %s", configName);

@@ -167,6 +167,13 @@ typedef enum _meshtastic_PortNum {
     /* ATAK Forwarder Module https://github.com/paulmandal/atak-forwarder
  ENCODING: libcotshrink */
     meshtastic_PortNum_ATAK_FORWARDER = 257,
+    /* Acknowledged Group Messaging protocol.
+ Payload is a GroupMessage protobuf.
+ ENCODING: Protobuf */
+    meshtastic_PortNum_GROUP_MESSAGE_APP = 258,
+    /* Media transfer protocol.
+ ENCODING: Protobuf */
+    meshtastic_PortNum_MEDIA_TRANSFER_APP = 259,
     /* Currently we limit port nums to no higher than this value */
     meshtastic_PortNum_MAX = 511
 } meshtastic_PortNum;
