@@ -45,6 +45,9 @@
 #include "modules/GroupMessageModule.h"
 #include "modules/MediaTransferModule.h"
 #include "modules/CrossBandModule.h"
+#ifdef ARCH_ESP32
+#include "modules/esp32/VoiceMemoModule.h"
+#endif
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
 #include "modules/TraceRouteModule.h"
 #endif
@@ -155,6 +158,10 @@ void setupModules()
     mediaTransferModule = new MediaTransferModule();
     // Cross-band awareness — always instantiated, module checks enabled flag in runOnce()
     crossBandModule = new CrossBandModule();
+#ifdef ARCH_ESP32
+    // Voice memo — on-device Codec2 recording/playback via MediaTransferModule
+    voiceMemoModule = new VoiceMemoModule();
+#endif
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
     traceRouteModule = new TraceRouteModule();
 #endif

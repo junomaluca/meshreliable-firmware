@@ -7,6 +7,11 @@
 #include <unordered_map>
 #include <vector>
 
+// Callback invoked when an incoming transfer completes successfully
+typedef void (*TransferCompleteCallback)(const uint8_t *data, uint32_t size,
+                                          meshtastic_MediaContentType contentType,
+                                          uint32_t fromNode, uint32_t transferId);
+
 // Tracks state for an outgoing media transfer
 struct OutgoingTransfer {
     uint32_t transferId;
@@ -62,6 +67,9 @@ class MediaTransferModule : private concurrency::OSThread, public ProtobufModule
     // Get progress of an outgoing transfer (0-100)
     int getTransferProgress(uint32_t transferId);
 
+    // Register a callback for completed incoming transfers
+    void setTransferCompleteCallback(TransferCompleteCallback cb) { completionCallback = cb; }
+
   protected:
     virtual int32_t runOnce() override;
     virtual bool handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_MediaTransfer *decoded) override;
@@ -103,6 +111,8 @@ class MediaTransferModule : private concurrency::OSThread, public ProtobufModule
 
     // CRC32 calculation
     static uint32_t crc32(const uint8_t *data, uint32_t length);
+
+    TransferCompleteCallback completionCallback = nullptr;
 };
 
 extern MediaTransferModule *mediaTransferModule;

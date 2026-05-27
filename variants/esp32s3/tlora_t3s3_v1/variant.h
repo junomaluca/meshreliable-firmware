@@ -75,5 +75,18 @@
 #define LR11X0_DIO_AS_RF_SWITCH
 #endif
 
+// Voice memo hardware (MVSR variant — MAX98357A speaker + MSM261S4030H0R mic)
+#ifdef HAS_VOICE_MEMO
+#define MVSR_MIC_BCLK 47
+#define MVSR_MIC_WS 15
+#define MVSR_MIC_DATA 48
+#define MVSR_MIC_EN 35
+#define MVSR_SPK_BCLK 40
+#define MVSR_SPK_LRCLK 41
+#define MVSR_SPK_DATA 39
+#define MVSR_SPK_SD_MODE 38
+#define MVSR_VIBRATION 46
+#endif
+
 #define HAS_SDCARD // Have SPI interface SD card slot
 #define SDCARD_USE_SPI1

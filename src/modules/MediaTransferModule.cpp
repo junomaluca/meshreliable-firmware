@@ -375,8 +375,12 @@ void MediaTransferModule::handleMediaComplete(const meshtastic_MeshPacket &mp, c
                      decoded.transfer_id, it->totalSize);
             sendAckComplete(mp.channel, decoded.transfer_id);
 
-            // The complete data is in it->data — available for the companion app to retrieve
-            // For now, just log completion. Future: expose via PhoneAPI
+            // Notify registered callback (e.g. VoiceMemoModule for auto-playback)
+            if (completionCallback) {
+                completionCallback(it->data.data(), it->totalSize, it->contentType,
+                                   it->fromNodeId, it->transferId);
+            }
+
             incoming.erase(it);
             return;
         }
