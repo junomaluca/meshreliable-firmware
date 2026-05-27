@@ -39,6 +39,16 @@ struct PendingPacket {
     /** Starts at NUM_RETRANSMISSIONS -1 and counts down.  Once zero it will be removed from the list */
     uint8_t numRetransmissions = 0;
 
+    // --- MeshReliable persistent retry fields ---
+    /** Whether this packet uses persistent (time-window) retries instead of count-based */
+    bool persistentRetry = false;
+
+    /** When persistent retry started (millis) */
+    uint32_t retryStartMsec = 0;
+
+    /** Current retry interval in ms (doubles each attempt, capped at max) */
+    uint32_t currentIntervalMs = 0;
+
     PendingPacket() {}
     explicit PendingPacket(meshtastic_MeshPacket *p, uint8_t numRetransmissions);
 };
@@ -121,6 +131,12 @@ class NextHopRouter : public FloodingRouter
      * Add p to the list of packets to retransmit occasionally.  We will free it once we stop retransmitting.
      */
     PendingPacket *startRetransmission(meshtastic_MeshPacket *p, uint8_t numReTx = NUM_INTERMEDIATE_RETX);
+
+    /**
+     * Start persistent (time-window) retransmission for a DM packet.
+     * Uses exponential backoff within a configurable retry window.
+     */
+    PendingPacket *startPersistentRetransmission(meshtastic_MeshPacket *p);
 
     // Return true if we're allowed to cancel a packet in the txQueue (so we may never transmit it even once)
     bool roleAllowsCancelingFromTxQueue(const meshtastic_MeshPacket *p);

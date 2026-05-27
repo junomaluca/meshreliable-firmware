@@ -1,5 +1,6 @@
 #include "NextHopRouter.h"
 #include "MeshTypes.h"
+#include "PowerStatus.h"
 #include "meshUtils.h"
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
 #include "modules/TraceRouteModule.h"
@@ -240,7 +241,7 @@ bool NextHopRouter::stopRetransmission(GlobalPacketId key)
         auto p = old->packet;
         /* Only when we already transmitted a packet via LoRa, we will cancel the packet in the Tx queue
           to avoid canceling a transmission if it was ACKed super fast via MQTT */
-        if (old->numRetransmissions < NUM_RELIABLE_RETX - 1) {
+        if (old->persistentRetry || old->numRetransmissions < NUM_RELIABLE_RETX - 1) {
             // We only cancel it if we are the original sender or if we're not a router(_late)
             if (isFromUs(p) || roleAllowsCancelingFromTxQueue(p)) {
                 // remove the 'original' (identified by originator and packet->id) from the txqueue and free it
@@ -279,6 +280,38 @@ PendingPacket *NextHopRouter::startRetransmission(meshtastic_MeshPacket *p, uint
 }
 
 /**
+ * Start persistent (time-window based) retransmission for DM packets.
+ * Uses exponential backoff: initial_retry_interval_ms doubling to max_retry_interval_ms,
+ * continuing for retry_window_seconds total time.
+ */
+PendingPacket *NextHopRouter::startPersistentRetransmission(meshtastic_MeshPacket *p)
+{
+    auto id = GlobalPacketId(p);
+
+    // Read config with defaults
+    auto cfg = moduleConfig.reliable_message;
+    uint32_t initialInterval = cfg.initial_retry_interval_ms > 0 ? cfg.initial_retry_interval_ms : 15000;
+
+    stopRetransmission(getFrom(p), p->id);
+
+    PendingPacket rec;
+    rec.packet = p;
+    rec.numRetransmissions = 255; // High value — persistent mode uses time window, not count
+    rec.persistentRetry = true;
+    rec.retryStartMsec = millis();
+    rec.currentIntervalMs = initialInterval;
+    rec.nextTxMsec = millis() + initialInterval;
+
+    LOG_INFO("Starting persistent DM retry for 0x%x->0x%x (id=0x%x), initial interval %ums",
+             p->from, p->to, p->id, initialInterval);
+
+    pending[id] = rec;
+    setReceivedMessage(); // Wake router thread
+
+    return &pending[id];
+}
+
+/**
  * Do any retransmissions that are scheduled (FIXME - for the time being called from loop)
  */
 int32_t NextHopRouter::doRetransmissions()
@@ -286,34 +319,98 @@ int32_t NextHopRouter::doRetransmissions()
     uint32_t now = millis();
     int32_t d = INT32_MAX;
 
-    // FIXME, we should use a better datastructure rather than walking through this map.
-    // for(auto el: pending) {
     for (auto it = pending.begin(), nextIt = it; it != pending.end(); it = nextIt) {
         ++nextIt; // we use this odd pattern because we might be deleting it...
         auto &p = it->second;
 
         bool stillValid = true; // assume we'll keep this record around
 
-        // FIXME, handle 51 day rolloever here!!!
         if (p.nextTxMsec <= now) {
-            if (p.numRetransmissions == 0) {
+            if (p.persistentRetry) {
+                // --- MeshReliable: Persistent retry mode ---
+                auto cfg = moduleConfig.reliable_message;
+                uint32_t windowMs = (cfg.retry_window_seconds > 0 ? cfg.retry_window_seconds : 3600) * 1000UL;
+                uint32_t maxInterval = cfg.max_retry_interval_ms > 0 ? cfg.max_retry_interval_ms : 300000;
+                uint32_t battThreshold = cfg.battery_throttle_threshold > 0 ? cfg.battery_throttle_threshold : 20;
+
+                uint32_t elapsed = now - p.retryStartMsec;
+
+                // Check if retry window has expired
+                if (elapsed >= windowMs) {
+                    if (isFromUs(p.packet)) {
+                        LOG_WARN("Persistent DM retry window expired for 0x%x->0x%x (id=0x%x) after %us",
+                                 p.packet->from, p.packet->to, p.packet->id, elapsed / 1000);
+                        sendAckNak(meshtastic_Routing_Error_MAX_RETRANSMIT, getFrom(p.packet), p.packet->id, p.packet->channel);
+                    }
+                    stopRetransmission(it->first);
+                    stillValid = false;
+                } else {
+                    // Battery-aware throttling
+                    bool batteryPause = false;
+                    uint8_t batteryPct = 101; // default: external power
+                    if (powerStatus && powerStatus->getHasBattery()) {
+                        batteryPct = powerStatus->getBatteryChargePercent();
+                        if (batteryPct > 0 && batteryPct < battThreshold / 2) {
+                            // Below half threshold — pause retries entirely
+                            batteryPause = true;
+                            LOG_DEBUG("Persistent retry paused: battery at %d%% (threshold %d%%)", batteryPct, battThreshold);
+                        }
+                    }
+
+                    if (!batteryPause) {
+                        LOG_DEBUG("Persistent DM retransmission 0x%x->0x%x (id=0x%x), interval=%ums, elapsed=%us/%us",
+                                  p.packet->from, p.packet->to, p.packet->id,
+                                  p.currentIntervalMs, elapsed / 1000, windowMs / 1000);
+
+                        // Send the retransmission - alternate between NextHop and Flooding
+                        if (!isBroadcast(p.packet->to)) {
+                            // Every 3rd retry, use flooding as fallback
+                            static uint8_t retryCount = 0;
+                            retryCount++;
+                            if (retryCount % 3 == 0) {
+                                p.packet->next_hop = NO_NEXT_HOP_PREFERENCE;
+                                FloodingRouter::send(packetPool.allocCopy(*p.packet));
+                            } else {
+                                NextHopRouter::send(packetPool.allocCopy(*p.packet));
+                            }
+                        } else {
+                            FloodingRouter::send(packetPool.allocCopy(*p.packet));
+                        }
+
+                        // Exponential backoff: double the interval, cap at max
+                        p.currentIntervalMs = min(p.currentIntervalMs * 2, maxInterval);
+
+                        // Battery throttle: double interval again if battery is low
+                        uint32_t effectiveInterval = p.currentIntervalMs;
+                        if (batteryPct > 0 && batteryPct < battThreshold && batteryPct >= battThreshold / 2) {
+                            effectiveInterval *= 2;
+                            LOG_DEBUG("Battery throttle: doubling interval to %ums (battery %d%%)", effectiveInterval, batteryPct);
+                        }
+
+                        p.nextTxMsec = now + effectiveInterval;
+                        setReceivedMessage();
+                    } else {
+                        // Paused — check again in 30 seconds
+                        p.nextTxMsec = now + 30000;
+                    }
+                }
+            } else if (p.numRetransmissions == 0) {
+                // --- Original Meshtastic: count-based retry exhausted ---
                 if (isFromUs(p.packet)) {
                     LOG_DEBUG("Reliable send failed, returning a nak for fr=0x%x,to=0x%x,id=0x%x", p.packet->from, p.packet->to,
                               p.packet->id);
                     sendAckNak(meshtastic_Routing_Error_MAX_RETRANSMIT, getFrom(p.packet), p.packet->id, p.packet->channel);
                 }
-                // Note: we don't stop retransmission here, instead the Nak packet gets processed in sniffReceived
                 stopRetransmission(it->first);
-                stillValid = false; // just deleted it
+                stillValid = false;
             } else {
+                // --- Original Meshtastic: count-based retry ---
                 LOG_DEBUG("Sending retransmission fr=0x%x,to=0x%x,id=0x%x, tries left=%d", p.packet->from, p.packet->to,
                           p.packet->id, p.numRetransmissions);
 
                 if (!isBroadcast(p.packet->to)) {
                     if (p.numRetransmissions == 1) {
-                        // Last retransmission, reset next_hop (fallback to FloodingRouter)
                         p.packet->next_hop = NO_NEXT_HOP_PREFERENCE;
-                        // Also reset it in the nodeDB
                         meshtastic_NodeInfoLite *sentTo = nodeDB->getMeshNode(p.packet->to);
                         if (sentTo) {
                             LOG_INFO("Resetting next hop for packet with dest 0x%x\n", p.packet->to);
@@ -324,21 +421,16 @@ int32_t NextHopRouter::doRetransmissions()
                         NextHopRouter::send(packetPool.allocCopy(*p.packet));
                     }
                 } else {
-                    // Note: we call the superclass version because we don't want to have our version of send() add a new
-                    // retransmission record
                     FloodingRouter::send(packetPool.allocCopy(*p.packet));
                 }
 
-                // Queue again
                 --p.numRetransmissions;
                 setNextTx(&p);
             }
         }
 
         if (stillValid) {
-            // Update our desired sleep delay
             int32_t t = p.nextTxMsec - now;
-
             d = min(t, d);
         }
     }

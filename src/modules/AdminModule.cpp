@@ -1045,6 +1045,12 @@ bool AdminModule::handleSetModuleConfig(const meshtastic_ModuleConfig &c)
         moduleConfig.has_traffic_management = true;
         moduleConfig.traffic_management = c.payload_variant.traffic_management;
         break;
+    case meshtastic_ModuleConfig_reliable_message_tag:
+        LOG_INFO("Set module config: Reliable Message");
+        moduleConfig.has_reliable_message = true;
+        moduleConfig.reliable_message = c.payload_variant.reliable_message;
+        shouldReboot = false; // No reboot needed for retry config changes
+        break;
     }
     saveChanges(SEGMENT_MODULECONFIG, shouldReboot);
     return true;
@@ -1235,6 +1241,11 @@ void AdminModule::handleGetModuleConfig(const meshtastic_MeshPacket &req, const 
             configName = "Traffic Management";
             res.get_module_config_response.which_payload_variant = meshtastic_ModuleConfig_traffic_management_tag;
             res.get_module_config_response.payload_variant.traffic_management = moduleConfig.traffic_management;
+            break;
+        case meshtastic_AdminMessage_ModuleConfigType_RELIABLEMESSAGE_CONFIG:
+            configName = "Reliable Message";
+            res.get_module_config_response.which_payload_variant = meshtastic_ModuleConfig_reliable_message_tag;
+            res.get_module_config_response.payload_variant.reliable_message = moduleConfig.reliable_message;
             break;
         }
         LOG_INFO("Get module config: %s", configName);

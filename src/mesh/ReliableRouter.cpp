@@ -2,6 +2,7 @@
 #include "Default.h"
 #include "MeshTypes.h"
 #include "NodeDB.h"
+#include "PowerStatus.h"
 #include "configuration.h"
 #include "memGet.h"
 #include "mesh-pb-constants.h"
@@ -9,6 +10,34 @@
 #include "modules/RoutingModule.h"
 
 // ReliableRouter::ReliableRouter() {}
+
+/**
+ * Get the reliable message config with sensible defaults applied.
+ */
+static meshtastic_ModuleConfig_ReliableMessageConfig getReliableConfig()
+{
+    meshtastic_ModuleConfig_ReliableMessageConfig cfg = moduleConfig.reliable_message;
+    // Apply defaults if not configured
+    if (cfg.retry_window_seconds == 0)
+        cfg.retry_window_seconds = 3600; // 1 hour
+    if (cfg.initial_retry_interval_ms == 0)
+        cfg.initial_retry_interval_ms = 15000; // 15 seconds
+    if (cfg.max_retry_interval_ms == 0)
+        cfg.max_retry_interval_ms = 300000; // 5 minutes
+    if (cfg.battery_throttle_threshold == 0)
+        cfg.battery_throttle_threshold = 20; // 20%
+    return cfg;
+}
+
+/**
+ * Check if persistent DM retries are enabled and this is a DM packet.
+ */
+static bool shouldUsePersistentRetry(const meshtastic_MeshPacket *p)
+{
+    auto cfg = getReliableConfig();
+    // Must be enabled and must be a unicast (DM) packet with want_ack
+    return cfg.enabled && p->want_ack && !isBroadcast(p->to);
+}
 
 /**
  * If the message is want_ack, then add it to a list of packets to retransmit.
@@ -21,7 +50,11 @@ ErrorCode ReliableRouter::send(meshtastic_MeshPacket *p)
         auto copy = packetPool.allocCopy(*p);
         DEBUG_HEAP_AFTER("ReliableRouter::send", copy);
 
-        startRetransmission(copy, NUM_RELIABLE_RETX);
+        if (shouldUsePersistentRetry(p)) {
+            startPersistentRetransmission(copy);
+        } else {
+            startRetransmission(copy, NUM_RELIABLE_RETX);
+        }
     }
 
     /* If we have pending retransmissions, add the airtime of this packet to it, because during that time we cannot receive an
