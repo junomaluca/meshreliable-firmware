@@ -53,6 +53,18 @@ class GroupMessageModule : private concurrency::OSThread, public ProtobufModule<
     // Active ACK trackers for outgoing messages we're watching
     std::vector<GroupAckTracker> ackTrackers;
 
+    // MQTT dedup: recently seen message IDs (to avoid MQTT echo loops)
+    struct SeenMessageEntry {
+        uint32_t messageId;
+        uint32_t seenTime;
+    };
+    std::vector<SeenMessageEntry> recentlySeen;
+    static constexpr uint32_t MQTT_DEDUP_WINDOW_MS = 60000; // 1 minute
+
+    // Check and record a message for MQTT dedup
+    bool isDuplicateMessage(uint32_t messageId);
+    void cleanupSeenMessages();
+
     // Generate a unique message ID
     uint32_t generateMessageId();
 

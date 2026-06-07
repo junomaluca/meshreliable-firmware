@@ -463,7 +463,7 @@ typedef struct _meshtastic_ModuleConfig_TAKConfig {
 typedef struct _meshtastic_ModuleConfig_ReliableMessageConfig {
     /* Enable persistent DM retries (default: true) */
     bool enabled;
-    /* Total retry window in seconds (default: 3600 = 1 hour). Range: 60-86400. */
+    /* Total retry window in seconds (default: 86400 = 24 hours). Range: 60-86400. */
     uint32_t retry_window_seconds;
     /* Initial retry interval in milliseconds (default: 15000). Range: 5000-60000. */
     uint32_t initial_retry_interval_ms;

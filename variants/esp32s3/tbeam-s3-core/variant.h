@@ -15,11 +15,16 @@
 #define USE_SX1268
 #define USE_LR1121
 
-#define LORA_DIO0 -1 // a No connect on the SX1262 module
+#define LORA_DIO0 1  // DIO0 on SX1276 (IRQ on SX1262) — shared pin
 #define LORA_RESET 5
-#define LORA_DIO1 1 // SX1262 IRQ
-#define LORA_DIO2 4 // SX1262 BUSY
+#define LORA_DIO1 1 // SX1262 IRQ / SX1276 DIO0
+#define LORA_DIO2 4 // SX1262 BUSY / SX1276 DIO1
 #define LORA_DIO3   // Not connected on PCB, but internally on the TTGO SX1262, if DIO3 is high the TXCO is enabled
+
+// SX1276 (RF95) support — some T-Beam Supremes have SX1276 instead of SX1262/LR1121
+#define RF95_IRQ LORA_DIO0
+#define RF95_DIO1 LORA_DIO2
+#define RF95_RESET LORA_RESET
 
 #ifdef USE_SX1262
 #define SX126X_CS 10 // FIXME - we really should define LORA_CS instead

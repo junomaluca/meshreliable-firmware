@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-05-27T11:27:48.080922",
+  "devices": {
+    "A": "0x3043b610",
+    "C": "0x5cf410f9"
+  },
+  "results": {
+    "text_basic_dm": "PASS",
+    "text_basic_dm_reverse": "PASS",
+    "text_broadcast": "PASS",
+    "text_max_length": "PASS",
+    "text_emoji": "PASS",
+    "text_unicode": "PASS",
+    "text_rapid_fire": "PASS",
+    "text_bidirectional_rapid": "PASS",
+    "text_empty_message": "PASS",
+    "text_special_chars": "PASS"
+  },
+  "summary": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0
+  }
+}

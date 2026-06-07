@@ -24,6 +24,10 @@
 #include <nvs.h>
 #include <nvs_flash.h>
 
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#include "hal/brownout_hal.h"
+#endif
+
 // Weak empty variant shutdown prep function.
 // May be redefined by variant files.
 void variant_shutdown() __attribute__((weak));
@@ -108,6 +112,21 @@ void enableSlowCLK()
 
 void esp32Setup()
 {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    // Lower brownout detector to level 2 (~2.43V) instead of the default level 7 (~3.27V).
+    // Level 7 caused constant reboots during LoRa TX. Level 3 (~2.87V) still triggered
+    // on XIAO (6 reboots in 1 hour). Level 2 only fires on genuine power loss while
+    // still providing a clean reset instead of an undefined hang.
+    brownout_hal_config_t bo_cfg = {
+        .threshold = 2,
+        .enabled = true,
+        .reset_enabled = true,
+        .flash_power_down = false,
+        .rf_power_down = false,
+    };
+    brownout_hal_config(&bo_cfg);
+#endif
+
     /* We explicitly don't want to do call randomSeed,
     // as that triggers the esp32 core to use a less secure pseudorandom function.
     uint32_t seed = esp_random();

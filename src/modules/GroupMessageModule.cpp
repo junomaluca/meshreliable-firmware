@@ -1,10 +1,29 @@
 #include "GroupMessageModule.h"
+#include <algorithm>
 #include "MeshService.h"
 #include "NodeDB.h"
+#include "PowerStatus.h"
 #include "Router.h"
 #include "configuration.h"
 #include "gps/RTC.h"
 #include "mesh/Channels.h"
+
+// Battery-aware retry throttling
+static uint32_t getBatteryRetryMultiplier()
+{
+    if (!powerStatus || !powerStatus->getHasBattery())
+        return 1;
+    uint8_t pct = powerStatus->getBatteryChargePercent();
+    if (pct == 0 || pct > 100)
+        return 1;
+    if (pct <= 5)
+        return 0; // Disable rebroadcasts
+    if (pct <= 10)
+        return 4;
+    if (pct <= 20)
+        return 2;
+    return 1;
+}
 
 GroupMessageModule *groupMessageModule = nullptr;
 
@@ -40,9 +59,10 @@ int32_t GroupMessageModule::runOnce()
             continue;
         }
 
-        // Check if it's time to rebroadcast
-        if (tracker.rebroadcastCount < MAX_REBROADCASTS) {
-            uint32_t interval = REBROADCAST_INTERVALS[tracker.rebroadcastCount];
+        // Check if it's time to rebroadcast (battery-throttled)
+        uint32_t battMult = getBatteryRetryMultiplier();
+        if (tracker.rebroadcastCount < MAX_REBROADCASTS && battMult > 0) {
+            uint32_t interval = REBROADCAST_INTERVALS[tracker.rebroadcastCount] * battMult;
             if (now - tracker.lastRebroadcast >= interval) {
                 rebroadcastMessage(tracker);
             }
@@ -50,6 +70,9 @@ int32_t GroupMessageModule::runOnce()
 
         ++it;
     }
+
+    // Periodic cleanup of MQTT dedup entries
+    cleanupSeenMessages();
 
     // Run every 5 seconds to check trackers
     return 5000;
@@ -98,8 +121,15 @@ bool GroupMessageModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp,
 
 void GroupMessageModule::handleGroupText(const meshtastic_MeshPacket &mp, const meshtastic_GroupMessage &decoded)
 {
-    LOG_INFO("GroupMsg: TEXT from 0x%08x, msgId=%u, group=%u, text='%s'",
-             mp.from, decoded.message_id, decoded.group_id, decoded.text);
+    LOG_INFO("GroupMsg: TEXT from 0x%08x, msgId=%u, group=%u, text='%s'%s",
+             mp.from, decoded.message_id, decoded.group_id, decoded.text,
+             mp.via_mqtt ? " (via MQTT)" : "");
+
+    // MQTT dedup: skip messages we've already processed (prevents echo loops)
+    if (isDuplicateMessage(decoded.message_id)) {
+        LOG_DEBUG("GroupMsg: dedup — already processed msgId=%u", decoded.message_id);
+        return;
+    }
 
     // Check if we're in the member list
     uint32_t ourNode = nodeDB->getNodeNum();
@@ -318,4 +348,30 @@ void GroupMessageModule::requestRoster(uint8_t channelIndex, uint32_t groupId)
 
     sendGroupPacket(channelIndex, req);
     LOG_INFO("GroupMsg: sent ROSTER_REQUEST for group=%u", groupId);
+}
+
+bool GroupMessageModule::isDuplicateMessage(uint32_t messageId)
+{
+    for (auto &entry : recentlySeen) {
+        if (entry.messageId == messageId) {
+            return true;
+        }
+    }
+    // Not seen — record it
+    SeenMessageEntry entry;
+    entry.messageId = messageId;
+    entry.seenTime = millis();
+    recentlySeen.push_back(entry);
+    return false;
+}
+
+void GroupMessageModule::cleanupSeenMessages()
+{
+    uint32_t now = millis();
+    recentlySeen.erase(
+        std::remove_if(recentlySeen.begin(), recentlySeen.end(),
+                        [now](const SeenMessageEntry &e) {
+                            return (now - e.seenTime) > MQTT_DEDUP_WINDOW_MS;
+                        }),
+        recentlySeen.end());
 }

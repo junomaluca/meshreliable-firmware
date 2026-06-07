@@ -221,6 +221,11 @@ void MessageStore::addFromString(uint32_t sender, uint8_t channelIndex, const st
 
 #if ENABLE_MESSAGE_PERSISTENCE
 
+// Flash format version. Old format (v0) had no version marker and smaller records.
+// New format (v2) starts with MAGIC_BYTE, then version byte, then count, then records.
+static constexpr uint8_t MSG_STORE_MAGIC = 0xFE;
+static constexpr uint8_t MSG_STORE_VERSION = 2;
+
 // Compact, fixed-size on-flash representation using offset + length
 struct __attribute__((packed)) StoredMessageRecord {
     uint32_t timestamp;
@@ -231,6 +236,9 @@ struct __attribute__((packed)) StoredMessageRecord {
     uint8_t ackStatus;           // static_cast<uint8_t>(AckStatus)
     uint8_t type;                // static_cast<uint8_t>(MessageType)
     uint16_t textLength;         // message length
+    uint8_t isVoiceMemo;         // voice memo flag
+    uint8_t isPicture;           // picture flag
+    uint32_t voiceMemoTransferId; // transfer ID for playback lookup
     char text[MAX_MESSAGE_SIZE]; // store actual text here
 };
 
@@ -246,6 +254,9 @@ static inline void writeMessageRecord(SafeFile &f, const StoredMessage &m)
     rec.ackStatus = static_cast<uint8_t>(m.ackStatus);
     rec.type = static_cast<uint8_t>(m.type);
     rec.textLength = m.textLength;
+    rec.isVoiceMemo = m.isVoiceMemo ? 1 : 0;
+    rec.isPicture = m.isPicture ? 1 : 0;
+    rec.voiceMemoTransferId = m.voiceMemoTransferId;
 
     // Copy the actual text into the record from RAM pool
     const char *txt = getTextFromPool(m.textOffset);
@@ -270,8 +281,11 @@ static inline bool readMessageRecord(File &f, StoredMessage &m)
     m.ackStatus = static_cast<AckStatus>(rec.ackStatus);
     m.type = static_cast<MessageType>(rec.type);
     m.textLength = rec.textLength;
+    m.isVoiceMemo = (rec.isVoiceMemo != 0);
+    m.isPicture = (rec.isPicture != 0);
+    m.voiceMemoTransferId = rec.voiceMemoTransferId;
 
-    // 💡 Re-store text into pool and update offset
+    // Re-store text into pool and update offset
     m.textLength = strnlen(rec.text, MAX_MESSAGE_SIZE - 1);
     m.textOffset = storeTextInPool(rec.text, m.textLength);
 
@@ -289,6 +303,12 @@ void MessageStore::saveToFlash()
     SafeFile f(filename.c_str(), false);
 
     spiLock->lock();
+    // Write version header
+    uint8_t magic = MSG_STORE_MAGIC;
+    uint8_t version = MSG_STORE_VERSION;
+    f.write(&magic, 1);
+    f.write(&version, 1);
+
     uint8_t count = static_cast<uint8_t>(liveMessages.size());
     if (count > MAX_MESSAGES_SAVED)
         count = MAX_MESSAGES_SAVED;
@@ -322,8 +342,30 @@ void MessageStore::loadFromFlash()
     if (!f)
         return;
 
+    // Read and validate version header
+    uint8_t firstByte = 0;
+    f.readBytes(reinterpret_cast<char *>(&firstByte), 1);
+
     uint8_t count = 0;
-    f.readBytes(reinterpret_cast<char *>(&count), 1);
+    if (firstByte == MSG_STORE_MAGIC) {
+        // New format: magic + version + count + records
+        uint8_t version = 0;
+        f.readBytes(reinterpret_cast<char *>(&version), 1);
+        if (version != MSG_STORE_VERSION) {
+            // Unknown future version — discard to avoid corruption
+            LOG_WARN("MessageStore: unknown flash format version %d, discarding saved messages", version);
+            f.close();
+            return;
+        }
+        f.readBytes(reinterpret_cast<char *>(&count), 1);
+    } else {
+        // Old format (no magic byte): first byte is the count.
+        // Record size has changed, so old data is incompatible — discard.
+        LOG_WARN("MessageStore: old flash format detected, discarding saved messages");
+        f.close();
+        return;
+    }
+
     if (count > MAX_MESSAGES_SAVED)
         count = MAX_MESSAGES_SAVED;
 

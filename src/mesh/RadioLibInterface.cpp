@@ -15,6 +15,7 @@
 #include "PortduinoGlue.h"
 #include "meshUtils.h"
 #endif
+
 void LockingArduinoHal::spiBeginTransaction()
 {
     spiLock->lock();
@@ -276,6 +277,13 @@ void RadioLibInterface::onNotify(uint32_t notification)
     switch (notification) {
     case ISR_TX:
         handleTransmitInterrupt();
+        // Restore primary band after multi-band retry TX completes.
+        // Must be here (not in completeSending) to avoid recursion:
+        // switchBand→setStandby→completeSending→switchBand...
+        if (onAlternateBand) {
+            LOG_INFO("Restoring primary band after alternate-band TX");
+            switchBand(false); // switchBand calls startReceive internally
+        }
         startReceive();
         setTransmitDelay();
         break;
@@ -441,6 +449,8 @@ void RadioLibInterface::completeSending()
         // We are done sending that packet, release it
         packetPool.release(p);
     }
+    // Note: band restore after multi-band retry is handled in onNotify(ISR_TX),
+    // NOT here, to avoid infinite recursion via setStandby() → completeSending().
 }
 
 void RadioLibInterface::handleReceiveInterrupt()

@@ -43,19 +43,21 @@ static bool isPowered()
                          ? 1
                          : 0);
 
-    // If we are not a router and we already have AC power go to POWER state after init, otherwise go to ON
-    // We assume routers might be powered all the time, but from a low current (solar) source
-    bool isPowerSavingMode = config.power.is_power_saving || isRouter;
+    // Routers always use power-saving behavior (may be solar-powered)
+    if (isRouter)
+        return false;
 
-    /* To determine if we're externally powered, assumptions
-        1) If we're powered up and there's no battery, we must be getting power externally. (because we'd be dead otherwise)
+    // When USB is connected, always consider externally powered — even with is_power_saving.
+    // Power-saving mode should only reduce consumption when running on battery,
+    // not prevent the screen from staying on when plugged into USB.
+    if (powerStatus && powerStatus->getHasUSB())
+        return true;
 
-        2) If we detect USB power from the power management chip, we must be getting power externally.
+    // On battery: respect the power-saving config
+    if (config.power.is_power_saving)
+        return false;
 
-        3) On some boards we don't have the power management chip (like AXPxxxx) so we use EXT_PWR_DETECT GPIO pin to detect
-       external power source (see `isVbusIn()` in `Power.cpp`)
-    */
-    return !isPowerSavingMode && powerStatus && (!powerStatus->getHasBattery() || powerStatus->getHasUSB());
+    return powerStatus && !powerStatus->getHasBattery();
 }
 
 #if defined(T5_S3_EPAPER_PRO)
@@ -402,9 +404,7 @@ void PowerFSM_setup()
         powerFSM.add_timed_transition(&stateON, &stateDARK,
                                       Default::getConfiguredOrDefaultMs(config.display.screen_on_secs, default_screen_on_secs),
                                       NULL, "Screen-on timeout");
-        powerFSM.add_timed_transition(&statePOWER, &stateDARK,
-                                      Default::getConfiguredOrDefaultMs(config.display.screen_on_secs, default_screen_on_secs),
-                                      NULL, "Screen-on timeout");
+        // Don't add screen timeout when USB-powered — keep screen always on while plugged in
     }
 
 // We never enter light-sleep or NB states on NRF52 (because the CPU uses so little power normally)

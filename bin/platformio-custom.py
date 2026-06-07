@@ -239,10 +239,28 @@ for pref in userPrefs:
 current_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 build_epoch = int(current_date.timestamp())
 
+# Per-environment userPrefs overrides (e.g. VHF/UHF devices need different regions and channel slots)
+env_pref_overrides = {
+    "tbeam-s3-core": {
+        "USERPREFS_CONFIG_LORA_REGION": "meshtastic_Config_LoRaConfig_RegionCode_ITU2_2M",
+        "USERPREFS_LORACONFIG_CHANNEL_NUM": "7",  # VHF 2m band slot; 915 MHz devices use channel 20
+    },
+    "tbeam-bpf": {
+        "USERPREFS_CONFIG_LORA_REGION": "meshtastic_Config_LoRaConfig_RegionCode_ITU2_2M",
+        "USERPREFS_LORACONFIG_CHANNEL_NUM": "7",  # VHF 2m band slot; 915 MHz devices use channel 20
+    },
+}
+pio_env = env.get("PIOENV")
+if pio_env in env_pref_overrides:
+    for macro_name, macro_value in env_pref_overrides[pio_env].items():
+        flag_prefix = f"-D{macro_name}="
+        pref_flags = [f for f in pref_flags if not f.startswith(flag_prefix)]
+        pref_flags.append(flag_prefix + macro_value)
+
 flags = [
         "-DAPP_VERSION=" + verObj["long"],
         "-DAPP_VERSION_SHORT=" + verObj["short"],
-        "-DAPP_ENV=" + env.get("PIOENV"),
+        "-DAPP_ENV=" + pio_env,
         "-DAPP_REPO=" + repo_owner,
         "-DBUILD_EPOCH=" + str(build_epoch),
     ] + pref_flags

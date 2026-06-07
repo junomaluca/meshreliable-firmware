@@ -27,6 +27,9 @@ template <class T> class LR11x0Interface : public RadioLibInterface
 
     bool isIRQPending() override { return lora.getIrqFlags() != 0; }
 
+    /// Switch between sub-GHz and 2.4 GHz bands at runtime for multi-band retries.
+    bool switchBand(bool use24GHz) override;
+
 #ifdef LR11X0_AGC_RESET
     void resetAGC() override;
 #endif
@@ -36,6 +39,11 @@ template <class T> class LR11x0Interface : public RadioLibInterface
      * Specific module instance
      */
     T lora;
+
+    // Saved primary (sub-GHz) band parameters for restoration after 2.4 GHz retry
+    float primaryFreq = 0;
+    float primaryBw = 0;
+    int8_t primaryPower = 0;
 
     /**
      * Glue functions called from ISR land

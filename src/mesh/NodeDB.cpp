@@ -796,7 +796,11 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
     config.lora.tx_enabled =
         true; // FIXME: maybe false in the future, and setting region to enable it. (unset region forces it off)
     config.lora.override_duty_cycle = false;
+#ifdef USERPREFS_LORA_OK_TO_MQTT
+    config.lora.config_ok_to_mqtt = USERPREFS_LORA_OK_TO_MQTT;
+#else
     config.lora.config_ok_to_mqtt = false;
+#endif
 #if HAS_LORA_FEM
     config.lora.fem_lna_mode = meshtastic_Config_LoRaConfig_FEM_LNA_Mode_ENABLED;
 #else
@@ -851,7 +855,14 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
 #ifdef USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY
     config.lora.override_frequency = USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY;
 #endif
+#ifdef USERPREFS_LORA_HOP_LIMIT
+    config.lora.hop_limit = USERPREFS_LORA_HOP_LIMIT;
+#else
     config.lora.hop_limit = HOP_RELIABLE;
+#endif
+#ifdef USERPREFS_LORA_TX_POWER
+    config.lora.tx_power = USERPREFS_LORA_TX_POWER;
+#endif
 #ifdef USERPREFS_CONFIG_LORA_IGNORE_MQTT
     config.lora.ignore_mqtt = USERPREFS_CONFIG_LORA_IGNORE_MQTT;
 #else
@@ -962,6 +973,8 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
 #ifdef USERPREFS_FIXED_BLUETOOTH
     config.bluetooth.fixed_pin = USERPREFS_FIXED_BLUETOOTH;
     config.bluetooth.mode = meshtastic_Config_BluetoothConfig_PairingMode_FIXED_PIN;
+#elif defined(USERPREFS_NO_PIN_BLUETOOTH)
+    config.bluetooth.mode = meshtastic_Config_BluetoothConfig_PairingMode_NO_PIN;
 #else
     config.bluetooth.mode = hasScreen ? meshtastic_Config_BluetoothConfig_PairingMode_RANDOM_PIN
                                       : meshtastic_Config_BluetoothConfig_PairingMode_FIXED_PIN;
@@ -1157,6 +1170,54 @@ void NodeDB::installDefaultModuleConfig()
     moduleConfig.mqtt.tls_enabled = USERPREFS_MQTT_TLS_ENABLED;
 #else
     moduleConfig.mqtt.tls_enabled = default_mqtt_tls_enabled;
+#endif
+#ifdef USERPREFS_MQTT_CLIENT_PROXY
+    moduleConfig.mqtt.proxy_to_client_enabled = USERPREFS_MQTT_CLIENT_PROXY;
+#endif
+#ifdef USERPREFS_MQTT_MAP_REPORTING_ENABLED
+    moduleConfig.mqtt.has_map_report_settings = true;
+    moduleConfig.mqtt.map_report_settings.should_report_location = USERPREFS_MQTT_MAP_REPORTING_ENABLED;
+#endif
+#ifdef USERPREFS_MQTT_MAP_PUBLISH_INTERVAL
+    moduleConfig.mqtt.has_map_report_settings = true;
+    moduleConfig.mqtt.map_report_settings.publish_interval_secs = USERPREFS_MQTT_MAP_PUBLISH_INTERVAL;
+#endif
+
+#ifdef USERPREFS_STORE_FORWARD_ENABLED
+    moduleConfig.store_forward.enabled = USERPREFS_STORE_FORWARD_ENABLED;
+#endif
+#ifdef USERPREFS_STORE_FORWARD_HEARTBEAT
+    moduleConfig.store_forward.heartbeat = USERPREFS_STORE_FORWARD_HEARTBEAT;
+#endif
+#ifdef USERPREFS_STORE_FORWARD_RECORDS
+    moduleConfig.store_forward.records = USERPREFS_STORE_FORWARD_RECORDS;
+#endif
+#ifdef USERPREFS_STORE_FORWARD_HISTORY_RETURN_MAX
+    moduleConfig.store_forward.history_return_max = USERPREFS_STORE_FORWARD_HISTORY_RETURN_MAX;
+#endif
+#ifdef USERPREFS_STORE_FORWARD_HISTORY_RETURN_WINDOW
+    moduleConfig.store_forward.history_return_window = USERPREFS_STORE_FORWARD_HISTORY_RETURN_WINDOW;
+#endif
+
+#ifdef USERPREFS_EXT_NOTIF_NAG_TIMEOUT
+    moduleConfig.external_notification.nag_timeout = USERPREFS_EXT_NOTIF_NAG_TIMEOUT;
+#endif
+#ifdef USERPREFS_EXT_NOTIF_ALERT_BELL
+    moduleConfig.external_notification.alert_bell_buzzer = USERPREFS_EXT_NOTIF_ALERT_BELL;
+#endif
+
+#ifdef USERPREFS_MEDIA_TRANSFER_ENABLED
+    moduleConfig.has_media_transfer = true;
+    moduleConfig.media_transfer.enabled = USERPREFS_MEDIA_TRANSFER_ENABLED;
+#endif
+#ifdef USERPREFS_MEDIA_TRANSFER_CHUNK_SIZE
+    moduleConfig.media_transfer.chunk_size_bytes = USERPREFS_MEDIA_TRANSFER_CHUNK_SIZE;
+#endif
+#ifdef USERPREFS_MEDIA_TRANSFER_YIELD_TO_TEXT
+    moduleConfig.media_transfer.yield_to_text = USERPREFS_MEDIA_TRANSFER_YIELD_TO_TEXT;
+#endif
+#ifdef USERPREFS_MEDIA_TRANSFER_PREFER_24GHZ
+    moduleConfig.media_transfer.prefer_24ghz = USERPREFS_MEDIA_TRANSFER_PREFER_24GHZ;
 #endif
 
     moduleConfig.has_neighbor_info = true;
@@ -1768,6 +1829,15 @@ void NodeDB::loadFromDisk()
 #ifdef USERPREFS_CONFIG_LORA_REGION
     config.lora.region = USERPREFS_CONFIG_LORA_REGION;
 #endif
+
+    // Ham-only devices (e.g. T-Beam BPF) must always be in licensed mode
+    // to satisfy the licensedOnly check in validateConfigRegion()
+#ifdef HAS_HAM_2M_ONLY
+    owner.is_licensed = true;
+#endif
+#ifdef USERPREFS_LORACONFIG_CHANNEL_NUM
+    config.lora.channel_num = USERPREFS_LORACONFIG_CHANNEL_NUM;
+#endif
 #ifdef USERPREFS_LORACONFIG_USE_PRESET
     config.lora.use_preset = USERPREFS_LORACONFIG_USE_PRESET;
 #endif
@@ -1782,6 +1852,18 @@ void NodeDB::loadFromDisk()
 #endif
 #ifdef USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY
     config.lora.override_frequency = USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY;
+#endif
+
+    // Guard: if saved config has displaymode=COLOR but this build doesn't
+    // support the MUI/TFT color renderer (HAS_TFT), force back to DEFAULT
+    // so the LovyanGFX ST7796/ST7789 path can initialize the screen.
+    // This prevents a dark screen when flashing firmware over a prior build
+    // (e.g. stock LilyGo) that had HAS_TFT and saved COLOR to NVS.
+#if !HAS_TFT
+    if (config.display.displaymode == meshtastic_Config_DisplayConfig_DisplayMode_COLOR) {
+        LOG_WARN("displaymode=COLOR but HAS_TFT not defined, forcing DEFAULT");
+        config.display.displaymode = meshtastic_Config_DisplayConfig_DisplayMode_DEFAULT;
+    }
 #endif
 
     if (backupSecurity.private_key.size > 0) {
@@ -1853,6 +1935,26 @@ void NodeDB::loadFromDisk()
             LOG_INFO("Loaded saved moduleConfig version %d", moduleConfig.version);
         }
     }
+
+    // ---- Always-apply moduleConfig overrides (after disk load) ----
+
+    // Always enable media transfer module (overrides NVS)
+    moduleConfig.has_media_transfer = true;
+    moduleConfig.media_transfer.enabled = true;
+    if (moduleConfig.media_transfer.chunk_size_bytes == 0)
+        moduleConfig.media_transfer.chunk_size_bytes = 200;
+
+#ifdef T_LORA_PAGER
+    // Always apply Pager rotary encoder config — stock firmware doesn't
+    // configure these, and NVS from stock persists across firmware flash.
+    moduleConfig.canned_message.updown1_enabled = true;
+    moduleConfig.canned_message.inputbroker_pin_a = ROTARY_A;
+    moduleConfig.canned_message.inputbroker_pin_b = ROTARY_B;
+    moduleConfig.canned_message.inputbroker_pin_press = ROTARY_PRESS;
+    moduleConfig.canned_message.inputbroker_event_cw = meshtastic_ModuleConfig_CannedMessageConfig_InputEventChar(28);
+    moduleConfig.canned_message.inputbroker_event_ccw = meshtastic_ModuleConfig_CannedMessageConfig_InputEventChar(29);
+    moduleConfig.canned_message.inputbroker_event_press = meshtastic_ModuleConfig_CannedMessageConfig_InputEventChar_SELECT;
+#endif
 
     state = loadProto(channelFileName, meshtastic_ChannelFile_size, sizeof(meshtastic_ChannelFile), &meshtastic_ChannelFile_msg,
                       &channelFile);
@@ -2531,6 +2633,8 @@ void NodeDB::updateFrom(const meshtastic_MeshPacket &mp)
 
         if (mp.rx_time) // if the packet has a valid timestamp use it to update our last_heard
             info->last_heard = mp.rx_time;
+        else if (getTime(false) > 0) // fallback to boot-relative time if no valid rx_time (no GPS/NTP)
+            info->last_heard = getTime(false);
 
         if (mp.rx_snr)
             info->snr = mp.rx_snr; // keep the most recent SNR we received for this node.

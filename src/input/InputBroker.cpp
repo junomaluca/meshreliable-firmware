@@ -106,10 +106,12 @@ int InputBroker::handleInputEvent(const InputEvent *event)
         screenWasOff = !screen->isScreenOn();
     }
 #endif
+    LOG_WARN("BTN-DBG: InputBroker evt=%u screenWasOff=%d", event->inputEvent, screenWasOff);
     powerFSM.trigger(EVENT_INPUT);
 
     if (event && event->inputEvent != INPUT_BROKER_NONE && externalNotificationModule &&
         moduleConfig.external_notification.enabled && externalNotificationModule->nagging()) {
+        LOG_WARN("BTN-DBG: InputBroker CONSUMED by ext notification stop");
         externalNotificationModule->stopNow();
         // If this turns off a notification, don't further process the event
         return 0;
@@ -117,8 +119,16 @@ int InputBroker::handleInputEvent(const InputEvent *event)
 
 #if HAS_SCREEN
     if (screen && screenWasOff) {
-        // If the screen was off, it is in the process of turning on, and we just drop the event
-        return 0;
+        // Screen was off and is now waking up via EVENT_INPUT.
+        // For USER_PRESS (boot button) and CANCEL (PMU power button), wake AND forward
+        // so the frame advances, giving the user immediate visual feedback.
+        // For other events, just wake the screen — don't forward.
+        if (event->inputEvent == INPUT_BROKER_USER_PRESS || event->inputEvent == INPUT_BROKER_CANCEL) {
+            LOG_WARN("BTN-DBG: InputBroker screenWasOff, forwarding evt=%u for frame advance", event->inputEvent);
+        } else {
+            LOG_WARN("BTN-DBG: InputBroker screenWasOff, dropping evt=%u", event->inputEvent);
+            return 0;
+        }
     }
 #endif
 

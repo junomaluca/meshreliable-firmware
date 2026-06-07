@@ -39,37 +39,40 @@ typedef enum _meshtastic_MediaContentType {
 } meshtastic_MediaContentType;
 
 /* Struct definitions */
+/* Bytes array type for chunk_data field (nanopb requires PB_BYTES_ARRAY_T) */
+typedef PB_BYTES_ARRAY_T(200) meshtastic_MediaTransfer_chunk_data_t;
+
 /* A media transfer packet. Sent on portnum MEDIA_TRANSFER_APP.
-   Note: scalar fields are placed first to keep offsets within nanopb width-1 limits. */
+   IMPORTANT: Both struct layout and FIELDLIST must be in protobuf tag order
+   for nanopb's AUTO descriptor and field-finding to work correctly. */
 typedef struct _meshtastic_MediaTransfer {
-    /* Type of this media transfer message */
+    /* Type of this media transfer message (tag 1) */
     meshtastic_MediaTransferType type;
-    /* Unique transfer ID */
+    /* Unique transfer ID (tag 2) */
     uint32_t transfer_id;
-    /* For MEDIA_CHUNK: which chunk this is (0-indexed) */
+    /* For MEDIA_CHUNK: which chunk this is, 0-indexed (tag 3) */
     uint32_t chunk_index;
-    /* For MEDIA_START: total number of chunks */
+    /* For MEDIA_START: total number of chunks (tag 4) */
     uint32_t total_chunks;
-    /* For MEDIA_START: total size in bytes of the compressed payload */
+    /* For MEDIA_START: total size in bytes of the compressed payload (tag 5) */
     uint32_t total_size;
-    /* For MEDIA_START: content type of the media */
+    /* For MEDIA_CHUNK: the chunk data, up to 200 bytes (tag 6) */
+    meshtastic_MediaTransfer_chunk_data_t chunk_data;
+    /* For MEDIA_START: content type of the media (tag 7) */
     meshtastic_MediaContentType content_type;
-    /* For MEDIA_START: CRC32 checksum of the complete compressed payload */
-    uint32_t checksum;
-    /* For MEDIA_START: duration in seconds (voice memos) */
-    uint32_t duration_seconds;
-    /* For MEDIA_START: image width */
-    uint32_t width;
-    /* For MEDIA_START: image height */
-    uint32_t height;
-    /* For MEDIA_CHUNK: the chunk data (up to 200 bytes) */
-    pb_size_t chunk_data_size;
-    uint8_t chunk_data[200];
-    /* For MEDIA_NACK: list of missing chunk indices to retransmit */
+    /* For MEDIA_NACK: list of missing chunk indices to retransmit (tag 8) */
     pb_size_t missing_chunks_count;
     uint32_t missing_chunks[32];
-    /* For MEDIA_START: optional MIME type string */
+    /* For MEDIA_START: CRC32 checksum of the complete compressed payload (tag 9) */
+    uint32_t checksum;
+    /* For MEDIA_START: optional MIME type string (tag 10) */
     char mime_type[32];
+    /* For MEDIA_START: duration in seconds for voice memos (tag 11) */
+    uint32_t duration_seconds;
+    /* For MEDIA_START: image width (tag 12) */
+    uint32_t width;
+    /* For MEDIA_START: image height (tag 13) */
+    uint32_t height;
 } meshtastic_MediaTransfer;
 
 
@@ -87,8 +90,8 @@ extern "C" {
 #define _meshtastic_MediaContentType_ARRAYSIZE ((meshtastic_MediaContentType)(meshtastic_MediaContentType_BINARY_DATA+1))
 
 /* Initializer values for message structs */
-#define meshtastic_MediaTransfer_init_default     {_meshtastic_MediaTransferType_MIN, 0, 0, 0, 0, _meshtastic_MediaContentType_MIN, 0, 0, 0, 0, 0, {0}, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, ""}
-#define meshtastic_MediaTransfer_init_zero        {_meshtastic_MediaTransferType_MIN, 0, 0, 0, 0, _meshtastic_MediaContentType_MIN, 0, 0, 0, 0, 0, {0}, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, ""}
+#define meshtastic_MediaTransfer_init_default     {_meshtastic_MediaTransferType_MIN, 0, 0, 0, 0, {0, {0}}, _meshtastic_MediaContentType_MIN, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 0, "", 0, 0, 0}
+#define meshtastic_MediaTransfer_init_zero        {_meshtastic_MediaTransferType_MIN, 0, 0, 0, 0, {0, {0}}, _meshtastic_MediaContentType_MIN, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 0, "", 0, 0, 0}
 
 /* Field tags (for use in manual encoding/decoding) */
 #define meshtastic_MediaTransfer_type_tag             1
@@ -106,22 +109,22 @@ extern "C" {
 #define meshtastic_MediaTransfer_height_tag           13
 
 /* Struct field encoding specification for nanopb */
-/* Note: field order matches struct layout, not tag order.
-   Scalar fields (width-1) are listed first to stay within 8-bit offset limits. */
+/* IMPORTANT: Field order MUST match both struct layout AND ascending tag order.
+   nanopb's field iterator searches linearly and expects tags in order. */
 #define meshtastic_MediaTransfer_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    type,              1) \
 X(a, STATIC,   SINGULAR, UINT32,   transfer_id,       2) \
 X(a, STATIC,   SINGULAR, UINT32,   chunk_index,       3) \
 X(a, STATIC,   SINGULAR, UINT32,   total_chunks,      4) \
 X(a, STATIC,   SINGULAR, UINT32,   total_size,        5) \
+X(a, STATIC,   SINGULAR, BYTES,    chunk_data,        6) \
 X(a, STATIC,   SINGULAR, UENUM,    content_type,      7) \
+X(a, STATIC,   REPEATED, UINT32,   missing_chunks,    8) \
 X(a, STATIC,   SINGULAR, UINT32,   checksum,          9) \
+X(a, STATIC,   SINGULAR, STRING,   mime_type,        10) \
 X(a, STATIC,   SINGULAR, UINT32,   duration_seconds, 11) \
 X(a, STATIC,   SINGULAR, UINT32,   width,            12) \
-X(a, STATIC,   SINGULAR, UINT32,   height,           13) \
-X(a, STATIC,   SINGULAR, BYTES,    chunk_data,        6) \
-X(a, STATIC,   REPEATED, UINT32,   missing_chunks,    8) \
-X(a, STATIC,   SINGULAR, STRING,   mime_type,        10)
+X(a, STATIC,   SINGULAR, UINT32,   height,           13)
 #define meshtastic_MediaTransfer_CALLBACK NULL
 #define meshtastic_MediaTransfer_DEFAULT NULL
 

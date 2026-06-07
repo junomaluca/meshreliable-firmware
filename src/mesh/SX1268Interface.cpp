@@ -12,7 +12,8 @@ SX1268Interface::SX1268Interface(LockingArduinoHal *hal, RADIOLIB_PIN_TYPE cs, R
 float SX1268Interface::getFreq()
 {
     // Set frequency to default of EU_433 if outside of allowed range (e.g. when region is UNSET)
-    if (savedFreq < 410 || savedFreq > 810)
+    // Range expanded to 137-960 MHz to support VHF/UHF amateur bands (SX1262/SX1268 hardware supports this)
+    if (savedFreq < 137 || savedFreq > 960)
         return 433.125f;
     else
         return savedFreq;

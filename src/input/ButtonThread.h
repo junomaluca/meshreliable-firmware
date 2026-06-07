@@ -71,6 +71,10 @@ class ButtonThread : public Observable<const InputEvent *>, public concurrency::
     void attachButtonInterrupts();
     void detachButtonInterrupts();
     void storeClickCount();
+
+    // Flag set by VoiceMemoModule after I2S deinit restores the button GPIO.
+    // ButtonThread checks this and resets OneButton to avoid ghost long-press events.
+    volatile bool needsButtonReset = false;
     bool isButtonPressed(int buttonPin)
     {
         if (_activeLow)

@@ -3,6 +3,7 @@
 #include "NodeDB.h"
 #include "PowerFSM.h"
 #include "Throttle.h"
+#include "concurrency/LockGuard.h"
 #include "configuration.h"
 #include "time.h"
 
@@ -53,6 +54,24 @@ void consolePrintf(const char *format, ...)
     console->flush();
 }
 
+size_t SerialConsole::write(uint8_t c)
+{
+    // When using protobufs, all serial writes must be serialized with
+    // streamLock to prevent interleaved bytes on the USB CDC endpoint.
+    // Unserialized character writes from debug logging can interleave with
+    // protobuf packet emission, corrupting the CDC framing and causing the
+    // host to disconnect the device (observed on XIAO ESP32-S3).
+    if (usingProtobufs) {
+        concurrency::LockGuard guard(&streamLock);
+        if (c == '\n')
+            RedirectablePrint::write('\r');
+        return RedirectablePrint::write(c);
+    }
+    if (c == '\n')
+        RedirectablePrint::write('\r');
+    return RedirectablePrint::write(c);
+}
+
 SerialConsole::SerialConsole() : StreamAPI(&Port), RedirectablePrint(&Port), concurrency::OSThread("SerialConsole")
 {
     api_type = TYPE_SERIAL;
@@ -95,7 +114,9 @@ int32_t SerialConsole::runOnce()
 #if defined(SERIAL_HAS_ON_RECEIVE) || defined(CONFIG_IDF_TARGET_ESP32S2)
     return Port.available() ? delay : INT32_MAX;
 #elif defined(IS_USB_SERIAL)
-    return HWCDC::isPlugged() ? delay : (1000 * 20);
+    // Always use normal delay — HWCDC::isPlugged() can glitch momentarily
+    // causing the serial console to become permanently unresponsive.
+    return delay;
 #else
     return delay;
 #endif
@@ -118,7 +139,9 @@ void SerialConsole::rxInt()
     setIntervalFromNow(0);
 }
 
-// For the serial port we can't really detect if any client is on the other side, so instead just look for recent messages
+// For the serial port we can't really detect if any client is on the other side, so instead just look for recent messages.
+// Note: HWCDC::isPlugged() check removed — it can return false during momentary USB signal glitches
+// on ESP32-S3, causing permanent serial disconnection. The timeout-based check is sufficient.
 bool SerialConsole::checkIsConnected()
 {
     return Throttle::isWithinTimespanMs(lastContactMsec, SERIAL_CONNECTION_TIMEOUT);
@@ -144,10 +167,15 @@ bool SerialConsole::handleToRadio(const uint8_t *buf, size_t len)
 
 void SerialConsole::log_to_serial(const char *logLevel, const char *format, va_list arg)
 {
-    if (usingProtobufs && config.security.debug_log_api_enabled) {
-        meshtastic_LogRecord_Level ll = RedirectablePrint::getLogLevel(logLevel);
-        auto thread = concurrency::OSThread::currentThread;
-        emitLogRecord(ll, thread ? thread->ThreadName.c_str() : "", format, arg);
-    } else
-        RedirectablePrint::log_to_serial(logLevel, format, arg);
+    if (usingProtobufs) {
+        if (config.security.debug_log_api_enabled) {
+            meshtastic_LogRecord_Level ll = RedirectablePrint::getLogLevel(logLevel);
+            auto thread = concurrency::OSThread::currentThread;
+            emitLogRecord(ll, thread ? thread->ThreadName.c_str() : "", format, arg);
+        }
+        // When protobuf API is active but debug logging disabled: suppress entirely
+        // to prevent plain text from corrupting the protobuf serial stream
+        return;
+    }
+    RedirectablePrint::log_to_serial(logLevel, format, arg);
 }

@@ -1,0 +1,137 @@
+{
+  "timestamp": "2026-06-03T11:07:21.855999",
+  "duration_seconds": 3320.0,
+  "devices": {
+    "VHF-A": {
+      "port": "/dev/cu.usbmodem101",
+      "node_id": "0x335e1be8",
+      "available": true
+    },
+    "VHF-B": {
+      "port": "/dev/cu.usbmodem1101",
+      "node_id": "0x335e1bdc",
+      "available": true
+    },
+    "BPF-A": {
+      "port": "/dev/cu.usbmodem21101",
+      "node_id": "0x57be8af9",
+      "available": true
+    },
+    "BPF-B": {
+      "port": "/dev/cu.usbmodem21201",
+      "node_id": "0x67676264",
+      "available": true
+    }
+  },
+  "per_key_stats": {
+    "text_dm_VHF-A_to_VHF-B": {
+      "sent": 50,
+      "send_ok": 42,
+      "send_fail": 8,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_dm_VHF-A_to_BPF-A": {
+      "sent": 50,
+      "send_ok": 36,
+      "send_fail": 14,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_dm_VHF-A_to_BPF-B": {
+      "sent": 50,
+      "send_ok": 29,
+      "send_fail": 21,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_dm_VHF-B_to_BPF-A": {
+      "sent": 50,
+      "send_ok": 45,
+      "send_fail": 5,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_dm_VHF-B_to_BPF-B": {
+      "sent": 50,
+      "send_ok": 46,
+      "send_fail": 4,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_dm_BPF-A_to_BPF-B": {
+      "sent": 50,
+      "send_ok": 46,
+      "send_fail": 4,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_bcast_VHF-A": {
+      "sent": 15,
+      "send_ok": 15,
+      "send_fail": 0,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_bcast_VHF-B": {
+      "sent": 15,
+      "send_ok": 15,
+      "send_fail": 0,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_bcast_BPF-A": {
+      "sent": 15,
+      "send_ok": 13,
+      "send_fail": 2,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_bcast_BPF-B": {
+      "sent": 15,
+      "send_ok": 13,
+      "send_fail": 2,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_channel_VHF-A": {
+      "sent": 10,
+      "send_ok": 8,
+      "send_fail": 2,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_channel_VHF-B": {
+      "sent": 10,
+      "send_ok": 9,
+      "send_fail": 1,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_channel_BPF-A": {
+      "sent": 10,
+      "send_ok": 9,
+      "send_fail": 1,
+      "recv_expected": 0,
+      "recv_ok": 0
+    },
+    "text_channel_BPF-B": {
+      "sent": 10,
+      "send_ok": 6,
+      "send_fail": 4,
+      "recv_expected": 0,
+      "recv_ok": 0
+    }
+  },
+  "per_key_errors": {},
+  "phase_results": {
+    "phase1": {
+      "dm_total_attempted": 300,
+      "dm_total_sent": 244,
+      "broadcast_attempted": 60,
+      "broadcast_sent": 56,
+      "channel_attempted": 40,
+      "channel_sent": 32
+    }
+  }
+}

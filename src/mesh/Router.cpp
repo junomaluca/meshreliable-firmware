@@ -513,11 +513,7 @@ DecodeState perhapsDecode(meshtastic_MeshPacket *p)
                     LOG_DEBUG("Invalid protobufs in received mesh packet id=0x%08x (bad psk?)", p->id);
                 } else if (decodedtmp.portnum == meshtastic_PortNum_UNKNOWN_APP) {
                     LOG_DEBUG("Invalid portnum (bad psk?)");
-#if !(MESHTASTIC_EXCLUDE_PKI)
-                } else if (!owner.is_licensed && isToUs(p) && decodedtmp.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP) {
-                    LOG_WARN("Rejecting legacy DM");
-                    return DecodeState::DECODE_FAILURE;
-#endif
+                // MeshReliable: Allow channel-key DMs (legacy DM rejection disabled for reliability)
                 } else {
                     p->decoded = decodedtmp;
                     p->which_payload_variant = meshtastic_MeshPacket_decoded_tag; // change type to decoded
@@ -656,45 +652,36 @@ meshtastic_Routing_Error perhapsEncode(meshtastic_MeshPacket *p)
         meshtastic_NodeInfoLite *node = nodeDB->getMeshNode(p->to);
         // We may want to retool things so we can send a PKC packet when the client specifies a key and nodenum, even if the node
         // is not in the local nodedb
-        // First, only PKC encrypt packets we are originating
-        if (isFromUs(p) &&
+        // MeshReliable: PKC disabled — always use channel key for DMs
+        // PKC auto-generated keys change on every reboot (not persisted to flash),
+        // causing decryption failures when stale public keys are cached by peers.
+        bool usedPKC = false;
+        if (false && isFromUs(p) &&
 #if ARCH_PORTDUINO
-            // Sim radio via the cli flag skips PKC
             !portduino_config.force_simradio &&
 #endif
-            // Don't use PKC with Ham mode
             !owner.is_licensed &&
-            // Don't use PKC on 'serial' or 'gpio' channels unless explicitly requested
             !(p->pki_encrypted != true && (strcasecmp(channels.getName(chIndex), Channels::serialChannel) == 0 ||
                                            strcasecmp(channels.getName(chIndex), Channels::gpioChannel) == 0)) &&
-            // Check for valid keys and single node destination
             config.security.private_key.size == 32 && !isBroadcast(p->to) &&
-            // Some portnums either make no sense to send with PKC
             p->decoded.portnum != meshtastic_PortNum_TRACEROUTE_APP && p->decoded.portnum != meshtastic_PortNum_NODEINFO_APP &&
-            p->decoded.portnum != meshtastic_PortNum_ROUTING_APP && p->decoded.portnum != meshtastic_PortNum_POSITION_APP) {
-            LOG_DEBUG("Use PKI!");
-            if (numbytes + MESHTASTIC_HEADER_LENGTH + MESHTASTIC_PKC_OVERHEAD > MAX_LORA_PAYLOAD_LEN)
-                return meshtastic_Routing_Error_TOO_LARGE;
-            // Check for a known public key for the destination
-            if (node == nullptr || node->public_key.size != 32) {
-                LOG_WARN("Unknown public key for destination node 0x%08x (portnum %d), refusing to send legacy DM", p->to,
-                         p->decoded.portnum);
-                return meshtastic_Routing_Error_PKI_SEND_FAIL_PUBLIC_KEY;
+            p->decoded.portnum != meshtastic_PortNum_ROUTING_APP && p->decoded.portnum != meshtastic_PortNum_POSITION_APP &&
+            node != nullptr && node->public_key.size == 32 &&
+            numbytes + MESHTASTIC_HEADER_LENGTH + MESHTASTIC_PKC_OVERHEAD <= MAX_LORA_PAYLOAD_LEN) {
+            // Only attempt PKC if keys look valid and sizes fit
+            if (!p->pki_encrypted || memfll(p->public_key.bytes, 0, 32) ||
+                memcmp(p->public_key.bytes, node->public_key.bytes, 32) == 0) {
+                LOG_DEBUG("Use PKI!");
+                crypto->encryptCurve25519(p->to, getFrom(p), node->public_key, p->id, numbytes, bytes, p->encrypted.bytes);
+                numbytes += MESHTASTIC_PKC_OVERHEAD;
+                p->channel = 0;
+                p->pki_encrypted = true;
+                usedPKC = true;
             }
-            if (p->pki_encrypted && !memfll(p->public_key.bytes, 0, 32) &&
-                memcmp(p->public_key.bytes, node->public_key.bytes, 32) != 0) {
-                LOG_WARN("Client public key differs from requested: 0x%02x, stored key begins 0x%02x", *p->public_key.bytes,
-                         *node->public_key.bytes);
-                return meshtastic_Routing_Error_PKI_FAILED;
-            }
-            crypto->encryptCurve25519(p->to, getFrom(p), node->public_key, p->id, numbytes, bytes, p->encrypted.bytes);
-            numbytes += MESHTASTIC_PKC_OVERHEAD;
-            p->channel = 0;
-            p->pki_encrypted = true;
-        } else {
+        }
+        if (!usedPKC) {
             if (p->pki_encrypted == true) {
-                // Client specifically requested PKI encryption
-                return meshtastic_Routing_Error_PKI_FAILED;
+                LOG_WARN("PKC requested but falling back to channel key");
             }
             hash = channels.setActiveByIndex(chIndex);
 

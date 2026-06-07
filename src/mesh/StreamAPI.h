@@ -112,5 +112,7 @@ class StreamAPI : public PhoneAPI
     /// interleave on the wire.
     meshtastic_FromRadio fromRadioScratchLog = {};
     uint8_t txBufLog[MAX_STREAM_BUF_SIZE] = {0};
+
+  protected:
     concurrency::Lock streamLock;
 };

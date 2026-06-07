@@ -6,12 +6,9 @@ namespace concurrency
 {
 
 #ifdef HAS_FREE_RTOS
-Lock::Lock() : handle(xSemaphoreCreateBinary())
+Lock::Lock() : handle(xSemaphoreCreateRecursiveMutex())
 {
     assert(handle);
-    if (xSemaphoreGive(handle) == false) {
-        abort();
-    }
 }
 
 Lock::~Lock()
@@ -21,14 +18,14 @@ Lock::~Lock()
 
 void Lock::lock()
 {
-    if (xSemaphoreTake(handle, portMAX_DELAY) == false) {
+    if (xSemaphoreTakeRecursive(handle, portMAX_DELAY) == false) {
         abort();
     }
 }
 
 void Lock::unlock()
 {
-    if (xSemaphoreGive(handle) == false) {
+    if (xSemaphoreGiveRecursive(handle) == false) {
         abort();
     }
 }

@@ -1,5 +1,6 @@
 #if RADIOLIB_EXCLUDE_LR11X0 != 1
 #include "LR11x0Interface.h"
+#include "MeshRadio.h"
 #include "Throttle.h"
 #include "configuration.h"
 #include "error.h"
@@ -93,14 +94,15 @@ template <typename T> bool LR11x0Interface<T>::init()
 #endif
 
     // Allow extra time for TCXO to stabilize after power-on
-    delay(10);
+    // (needs longer if SX126x probes ran first and set wrong TCXO voltage via DIO3)
+    delay(100);
 
     int res = lora.begin(getFreq(), bw, sf, cr, syncWord, power, preambleLength, tcxoVoltage);
 
     // Retry if we get SPI command failed - some units need extra TCXO stabilization time
     if (res == RADIOLIB_ERR_SPI_CMD_FAILED) {
         LOG_WARN("LR11x0 init failed with %d (SPI_CMD_FAILED), retrying after delay...", res);
-        delay(100);
+        delay(500);
         res = lora.begin(getFreq(), bw, sf, cr, syncWord, power, preambleLength, tcxoVoltage);
     }
 
@@ -348,6 +350,101 @@ template <typename T> void LR11x0Interface<T>::resetAGC()
     startReceive();
 }
 #endif
+
+template <typename T> bool LR11x0Interface<T>::switchBand(bool use24GHz)
+{
+    if (!wideLora()) {
+        LOG_WARN("switchBand called on non-dual-band radio");
+        return false;
+    }
+
+    // Don't switch if we're already on the requested band
+    if (use24GHz == onAlternateBand)
+        return true;
+
+    // Don't switch mid-TX
+    if (sendingPacket != NULL) {
+        LOG_WARN("switchBand: cannot switch while transmitting");
+        return false;
+    }
+
+    LOG_INFO("Switching to %s band for multi-band retry", use24GHz ? "2.4 GHz" : "sub-GHz");
+
+    setStandby();
+
+    // Determine the target frequency
+    // For 2.4 GHz: use LORA_24 region center frequency with current channel hash
+    // For sub-GHz: restore savedFreq
+    float targetFreq;
+    float targetBw;
+    int8_t targetPower;
+
+    if (use24GHz) {
+        // Save current sub-GHz parameters for restoration
+        primaryFreq = savedFreq;
+        primaryBw = bw;
+        primaryPower = power;
+
+        // Calculate 2.4 GHz frequency — use the same channel slot in the 2.4 GHz band
+        // LORA_24 region: 2400.0 - 2483.5 MHz
+        targetFreq = 2440.0f; // center of 2.4 GHz band
+        targetPower = min((int8_t)power, (int8_t)LR1120_MAX_POWER);
+
+        // Get wide-lora bandwidth for current preset
+        uint8_t wideSf, wideCr;
+        modemPresetToParams(config.lora.modem_preset, true, targetBw, wideSf, wideCr);
+    } else {
+        // Restore sub-GHz parameters
+        targetFreq = primaryFreq;
+        targetBw = primaryBw;
+        targetPower = primaryPower;
+    }
+
+    // Apply new frequency
+    int err = lora.setFrequency(targetFreq);
+    if (err != RADIOLIB_ERR_NONE) {
+        LOG_ERROR("switchBand: setFrequency(%f) failed: %d", targetFreq, err);
+        // Always clear onAlternateBand when restoring to sub-GHz to prevent infinite retry loop
+        if (!use24GHz)
+            onAlternateBand = false;
+        // Try to restore
+        lora.setFrequency(savedFreq);
+        startReceive();
+        return false;
+    }
+
+    // Apply bandwidth (may change between sub-GHz and 2.4 GHz)
+    err = lora.setBandwidth(targetBw, use24GHz);
+    if (err != RADIOLIB_ERR_NONE) {
+        LOG_ERROR("switchBand: setBandwidth(%f) failed: %d", targetBw, err);
+        lora.setFrequency(savedFreq);
+        lora.setBandwidth(primaryBw, false);
+        startReceive();
+        return false;
+    }
+
+    // Apply power
+    limitPower(use24GHz ? LR1120_MAX_POWER : LR1110_MAX_POWER);
+    err = lora.setOutputPower(power);
+    if (err != RADIOLIB_ERR_NONE)
+        LOG_WARN("switchBand: setOutputPower(%d) err: %d", power, err);
+
+    // Calibrate image rejection for the new frequency band
+    lora.calibrateImageRejection(targetFreq - 4.0f, targetFreq + 4.0f);
+
+    // Update preamble length for the band
+    lora.setPreambleLength(use24GHz ? wideLoraPreambleLengthDefault : preambleLengthDefault);
+
+    onAlternateBand = use24GHz;
+
+    // Resume receiving on the new band
+    startReceive();
+
+    LOG_INFO("Switched to %s: freq=%.3f MHz, bw=%.1f kHz, power=%d dBm",
+             use24GHz ? "2.4 GHz" : "sub-GHz", targetFreq, targetBw, power);
+
+    return true;
+}
 
 template <typename T> bool LR11x0Interface<T>::sleep()
 {

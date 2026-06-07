@@ -49,6 +49,9 @@ struct PendingPacket {
     /** Current retry interval in ms (doubles each attempt, capped at max) */
     uint32_t currentIntervalMs = 0;
 
+    /** Multi-band retry: count of retries so that even retries use alternate band */
+    uint8_t persistentRetryCount = 0;
+
     PendingPacket() {}
     explicit PendingPacket(meshtastic_MeshPacket *p, uint8_t numRetransmissions);
 };

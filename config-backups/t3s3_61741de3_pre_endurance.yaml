@@ -1,0 +1,68 @@
+# start of Meshtastic configure yaml
+canned_messages: '''Are you ok?|I am ok|I am lost|I need help|I want to leave|Where
+  are you?|Meet at the meeting point|I need to drink/eat|Yes|No|OK'''
+channel_url: https://meshtastic.org/e/#CjISIEJzMGZ2WlJSZEJoZ0k4N2RpZ3JIQWMzMlNxVTl6UXJuGgZtYWx1Y2EoATABOgIIIAoUEgIBBRoITG9uZ0Zhc3QoATABOgASEwgBIAsoBTgBQAdIAVAeWBTIBgE
+config:
+  bluetooth:
+    enabled: true
+    mode: NO_PIN
+  device:
+    nodeInfoBroadcastSecs: 10800
+    tzdef: PST8PDT,M3.2.0/2:00:00,M11.1.0/2:00:00
+  display:
+    screenOnSecs: 600
+  lora:
+    channelNum: 20
+    codingRate: 5
+    configOkToMqtt: true
+    hopLimit: 7
+    region: US
+    spreadFactor: 11
+    sx126xRxBoostedGain: false
+    txEnabled: true
+    txPower: 30
+    usePreset: true
+  network:
+    enabledProtocols: 1
+    wifiEnabled: true
+    wifiPsk: '3238396188'
+    wifiSsid: maluca
+  position:
+    broadcastSmartMinimumDistance: 100
+    broadcastSmartMinimumIntervalSecs: 300
+    gpsMode: NOT_PRESENT
+    gpsUpdateInterval: 120
+    positionBroadcastSecs: 3600
+    positionBroadcastSmartEnabled: true
+    positionFlags: 811
+  power:
+    lsSecs: 300
+    minWakeSecs: 10
+    sdsSecs: 4294967295
+    waitBluetoothSecs: 60
+  security:
+    privateKey: base64:wK4opy21ddwH5FS+7vjLzHf++yaVzDzZWPeV7iEc2lM=
+    publicKey: base64:WiM+xLVH0ZyaZcKFusf6TDkj1nSdsmNx1S6UxTvWa3M=
+    serialEnabled: true
+module_config:
+  ambientLighting:
+    blue: 227
+    current: 10
+    green: 29
+    red: 116
+  cannedMessage:
+    enabled: true
+  detectionSensor:
+    detectionTriggerType: LOGIC_HIGH
+    minimumBroadcastSecs: 45
+  mqtt:
+    address: mqtt.meshtastic.org
+    encryptionEnabled: true
+    password: large4cats
+    root: msh/US
+    username: meshdev
+  telemetry:
+    deviceUpdateInterval: 2147483647
+owner: Meshtastic 1de3
+owner_short: 1de3
+

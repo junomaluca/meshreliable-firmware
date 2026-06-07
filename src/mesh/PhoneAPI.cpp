@@ -18,6 +18,7 @@
 #include "concurrency/LockGuard.h"
 #include "main.h"
 #include "modules/NodeInfoModule.h"
+#include "modules/PhoneBufferModule.h"
 #include "xmodem.h"
 
 #if FromRadio_size > MAX_TO_FROM_RADIO_SIZE
@@ -100,6 +101,13 @@ void PhoneAPI::handleStartConfig()
         replayStatusIndex = 0;
     }
     resetReadIndex();
+
+    // Reset PhoneBufferModule readIndex so BLE gets all buffered messages from the start.
+    // This ensures that when the phone switches between devices, it replays the full buffer.
+    if (phoneBufferModule && api_type == TYPE_BLE) {
+        LOG_INFO("PhoneBuffer: resetting readIndex for new BLE connection (%u buffered)", phoneBufferModule->count());
+        phoneBufferModule->resetReadIndex();
+    }
 }
 
 void PhoneAPI::close()
@@ -501,6 +509,31 @@ size_t PhoneAPI::getFromRadio(uint8_t *buf)
             LOG_DEBUG("Send module config: tak");
             fromRadioScratch.moduleConfig.which_payload_variant = meshtastic_ModuleConfig_tak_tag;
             fromRadioScratch.moduleConfig.payload_variant.tak = moduleConfig.tak;
+            break;
+        case meshtastic_ModuleConfig_reliable_message_tag:
+            LOG_DEBUG("Send module config: reliable message");
+            fromRadioScratch.moduleConfig.which_payload_variant = meshtastic_ModuleConfig_reliable_message_tag;
+            fromRadioScratch.moduleConfig.payload_variant.reliable_message = moduleConfig.reliable_message;
+            break;
+        case meshtastic_ModuleConfig_group_message_tag:
+            LOG_DEBUG("Send module config: group message");
+            fromRadioScratch.moduleConfig.which_payload_variant = meshtastic_ModuleConfig_group_message_tag;
+            fromRadioScratch.moduleConfig.payload_variant.group_message = moduleConfig.group_message;
+            break;
+        case meshtastic_ModuleConfig_media_transfer_tag:
+            LOG_DEBUG("Send module config: media transfer");
+            fromRadioScratch.moduleConfig.which_payload_variant = meshtastic_ModuleConfig_media_transfer_tag;
+            fromRadioScratch.moduleConfig.payload_variant.media_transfer = moduleConfig.media_transfer;
+            break;
+        case meshtastic_ModuleConfig_cross_band_tag:
+            LOG_DEBUG("Send module config: cross band");
+            fromRadioScratch.moduleConfig.which_payload_variant = meshtastic_ModuleConfig_cross_band_tag;
+            fromRadioScratch.moduleConfig.payload_variant.cross_band = moduleConfig.cross_band;
+            break;
+        case meshtastic_ModuleConfig_statusmessage_tag:
+            LOG_DEBUG("Send module config: status message");
+            fromRadioScratch.moduleConfig.which_payload_variant = meshtastic_ModuleConfig_statusmessage_tag;
+            fromRadioScratch.moduleConfig.payload_variant.statusmessage = moduleConfig.statusmessage;
             break;
         default:
             LOG_DEBUG("Unhandled module config type %d", config_state);
@@ -1088,6 +1121,9 @@ void PhoneAPI::releaseClientNotification()
  */
 bool PhoneAPI::available()
 {
+    // Process any deferred rate-limited messages whose retry window has expired
+    processDeferredMessages();
+
     switch (state) {
     case STATE_SEND_NOTHING:
         return false;
@@ -1141,6 +1177,15 @@ bool PhoneAPI::available()
 #endif
 #endif
 
+        // Drain phone buffer (packets received while phone was disconnected).
+        // Guard: only drain for BLE connections — serial/wifi should not consume buffered
+        // packets meant for the phone app. Also verify api_state is not disconnected.
+        if (!packetForPhone && phoneBufferModule && phoneBufferModule->count() > 0 &&
+            service->api_state != service->STATE_DISCONNECTED &&
+            api_type == TYPE_BLE) {
+            packetForPhone = phoneBufferModule->getForPhone();
+        }
+
         if (!packetForPhone)
             packetForPhone = service->getForPhone();
         hasPacket = !!packetForPhone;
@@ -1190,6 +1235,9 @@ bool PhoneAPI::wasSeenRecently(uint32_t id)
  */
 bool PhoneAPI::handleToRadioPacket(meshtastic_MeshPacket &p)
 {
+    // Process any deferred rate-limited messages before handling the new packet
+    processDeferredMessages();
+
     printPacket("PACKET FROM PHONE", &p);
 
 #if defined(ARCH_PORTDUINO)
@@ -1226,11 +1274,19 @@ bool PhoneAPI::handleToRadioPacket(meshtastic_MeshPacket &p)
         return false;
     } else if (p.decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP && lastPortNumToRadio[p.decoded.portnum] &&
                Throttle::isWithinTimespanMs(lastPortNumToRadio[p.decoded.portnum], TWO_SECONDS_MS)) {
-        LOG_WARN("Rate limit portnum %d", p.decoded.portnum);
-        meshtastic_QueueStatus qs = router->getQueueStatus();
-        service->sendQueueStatusToPhone(qs, 0, p.id);
-        service->sendRoutingErrorResponse(meshtastic_Routing_Error_RATE_LIMIT_EXCEEDED, &p);
-        // sendNotification(meshtastic_LogRecord_Level_WARNING, p.id, "Text messages can only be sent once every 2 seconds");
+        // Instead of rejecting, queue for retry after the rate limit window expires
+        if (deferredMessages.size() < kMaxDeferredMessages) {
+            LOG_INFO("Rate-limited text msg id=0x%x, deferring for retry", p.id);
+            DeferredMessage dm;
+            dm.packet = p;
+            dm.retryAfterMs = lastPortNumToRadio[p.decoded.portnum] + TWO_SECONDS_MS + 100; // 100ms margin
+            deferredMessages.push_back(dm);
+        } else {
+            LOG_WARN("Rate limit portnum %d, deferred queue full", p.decoded.portnum);
+            meshtastic_QueueStatus qs = router->getQueueStatus();
+            service->sendQueueStatusToPhone(qs, 0, p.id);
+            service->sendRoutingErrorResponse(meshtastic_Routing_Error_RATE_LIMIT_EXCEEDED, &p);
+        }
         return false;
     }
 
@@ -1243,6 +1299,24 @@ bool PhoneAPI::handleToRadioPacket(meshtastic_MeshPacket &p)
     lastPortNumToRadio[p.decoded.portnum] = millis();
     service->handleToRadio(p);
     return true;
+}
+
+/**
+ * Process any deferred (rate-limited) messages whose retry window has expired.
+ */
+void PhoneAPI::processDeferredMessages()
+{
+    while (!deferredMessages.empty()) {
+        auto &dm = deferredMessages.front();
+        if (millis() >= dm.retryAfterMs) {
+            LOG_INFO("Sending deferred text msg id=0x%x", dm.packet.id);
+            lastPortNumToRadio[dm.packet.decoded.portnum] = millis();
+            service->handleToRadio(dm.packet);
+            deferredMessages.pop_front();
+        } else {
+            break; // Queue is ordered by time; if front isn't ready, nothing is
+        }
+    }
 }
 
 /// If the mesh service tells us fromNum has changed, tell the phone

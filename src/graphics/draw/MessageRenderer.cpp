@@ -245,6 +245,54 @@ static void drawRelayMark(OLEDDisplay *display, int x, int y, int size = 8)
     display->drawLine(centerX - 1, centerY - 4, centerX + 1, centerY - 4);
 }
 
+// Draw a small speaker icon for voice memo messages
+static void drawSpeakerIcon(OLEDDisplay *display, int x, int y, int size = 10)
+{
+    display->setColor(WHITE);
+    // Speaker body (small rectangle)
+    int bodyW = size / 3;
+    int bodyH = size / 2;
+    int bodyX = x;
+    int bodyY = y + (size - bodyH) / 2;
+    display->fillRect(bodyX, bodyY, bodyW, bodyH);
+    // Speaker cone (triangle via lines)
+    int coneX = bodyX + bodyW;
+    int coneTopY = y;
+    int coneBotY = y + size - 1;
+    int coneTipX = coneX + size / 2;
+    display->drawLine(coneX, bodyY, coneTipX, coneTopY);
+    display->drawLine(coneX, bodyY + bodyH - 1, coneTipX, coneBotY);
+    display->drawLine(coneTipX, coneTopY, coneTipX, coneBotY);
+    // Sound waves (two arcs)
+    int waveX = coneTipX + 2;
+    int waveCY = y + size / 2;
+    display->setPixel(waveX, waveCY - 2);
+    display->setPixel(waveX, waveCY);
+    display->setPixel(waveX, waveCY + 2);
+}
+
+// Draw a small camera icon for picture messages
+static void drawCameraIcon(OLEDDisplay *display, int x, int y, int size = 10)
+{
+    display->setColor(WHITE);
+    // Camera body (rectangle)
+    int bodyW = size;
+    int bodyH = size * 2 / 3;
+    int bodyY = y + (size - bodyH) / 2 + 1;
+    display->drawRect(x, bodyY, bodyW, bodyH);
+    // Lens (circle in center)
+    int lensR = bodyH / 3;
+    int lensCX = x + bodyW / 2;
+    int lensCY = bodyY + bodyH / 2;
+    display->drawCircle(lensCX, lensCY, lensR);
+    // Viewfinder bump on top
+    int bumpW = bodyW / 3;
+    int bumpX = x + bodyW / 3;
+    display->drawLine(bumpX, bodyY, bumpX, bodyY - 2);
+    display->drawLine(bumpX, bodyY - 2, bumpX + bumpW, bodyY - 2);
+    display->drawLine(bumpX + bumpW, bodyY - 2, bumpX + bumpW, bodyY);
+}
+
 static inline int getRenderedLineWidth(OLEDDisplay *display, const std::string &line, const Emote *emotes, int emoteCount)
 {
     return graphics::EmoteRenderer::analyzeLine(display, line, 0, emotes, emoteCount).width;
@@ -489,11 +537,15 @@ void drawTextMessageFrame(OLEDDisplay *display, OLEDDisplayUiState *state, int16
         return;
     }
 
+    // Media line type for special rendering
+    enum class MediaLineType : uint8_t { NONE = 0, VOICE_MEMO, PICTURE };
+
     // Build lines for filtered messages (newest first)
     std::vector<std::string> allLines;
     std::vector<bool> isMine;   // track alignment
     std::vector<bool> isHeader; // track header lines
     std::vector<AckStatus> ackForLine;
+    std::vector<MediaLineType> mediaType; // track media message lines
     // Hard limit on total cached lines to prevent unbounded growth from a single long message.
     // Reserve to the actual cache cap up front, because a single message can expand to many more
     // wrapped display lines than a small per-message estimate would predict. For a display
@@ -505,6 +557,7 @@ void drawTextMessageFrame(OLEDDisplay *display, OLEDDisplayUiState *state, int16
     isMine.reserve(MAX_CACHED_LINES);
     isHeader.reserve(MAX_CACHED_LINES);
     ackForLine.reserve(MAX_CACHED_LINES);
+    mediaType.reserve(MAX_CACHED_LINES);
 
     for (auto it = filtered.rbegin(); it != filtered.rend(); ++it) {
         const auto &m = *it;
@@ -637,11 +690,17 @@ void drawTextMessageFrame(OLEDDisplay *display, OLEDDisplayUiState *state, int16
             snprintf(headerStr, sizeof(headerStr), chanType[0] ? "%s @%s %s" : "%s @%s", timeBuf, truncatedSender, chanType);
         }
 
+        // Determine media type for this message
+        MediaLineType mlt = MediaLineType::NONE;
+        if (m.isVoiceMemo) mlt = MediaLineType::VOICE_MEMO;
+        else if (m.isPicture) mlt = MediaLineType::PICTURE;
+
         // Push header line
         allLines.push_back(headerStr);
         isMine.push_back(mine);
         isHeader.push_back(true);
         ackForLine.push_back(m.ackStatus);
+        mediaType.push_back(mlt);
 
         const char *msgText = MessageStore::getText(m);
 
@@ -658,6 +717,7 @@ void drawTextMessageFrame(OLEDDisplay *display, OLEDDisplayUiState *state, int16
             isMine.push_back(mine);
             isHeader.push_back(false);
             ackForLine.push_back(AckStatus::NONE);
+            mediaType.push_back(mlt);
             ++wrappedCount;
         }
     }
@@ -926,16 +986,37 @@ void drawTextMessageFrame(OLEDDisplay *display, OLEDDisplayUiState *state, int16
 
             } else {
                 // Render message line
+                constexpr int MEDIA_ICON_SIZE = 10;
+                constexpr int MEDIA_ICON_PAD = 3;
+                int iconOffset = 0;
+
+                // Draw media icon for voice memo / picture lines
+                if (mediaType[i] != MediaLineType::NONE) {
+                    iconOffset = MEDIA_ICON_SIZE + MEDIA_ICON_PAD;
+                }
+
                 if (isMine[i]) {
                     // Calculate actual rendered width including emotes
-                    int renderedWidth = getRenderedLineWidth(display, cachedLines[i], emotes, numEmotes);
+                    int renderedWidth = getRenderedLineWidth(display, cachedLines[i], emotes, numEmotes) + iconOffset;
                     int rightX = (SCREEN_WIDTH - SCROLLBAR_WIDTH - RIGHT_MARGIN) - renderedWidth - (showBubbles ? textIndent : 0);
                     if (rightX < LEFT_MARGIN)
                         rightX = LEFT_MARGIN;
 
-                    drawStringWithEmotes(display, rightX, lineY, cachedLines[i], emotes, numEmotes);
+                    if (mediaType[i] == MediaLineType::VOICE_MEMO)
+                        drawSpeakerIcon(display, rightX, lineY, MEDIA_ICON_SIZE);
+                    else if (mediaType[i] == MediaLineType::PICTURE)
+                        drawCameraIcon(display, rightX, lineY, MEDIA_ICON_SIZE);
+
+                    drawStringWithEmotes(display, rightX + iconOffset, lineY, cachedLines[i], emotes, numEmotes);
                 } else {
-                    drawStringWithEmotes(display, x + textIndent, lineY, cachedLines[i], emotes, numEmotes);
+                    int drawX = x + textIndent;
+
+                    if (mediaType[i] == MediaLineType::VOICE_MEMO)
+                        drawSpeakerIcon(display, drawX, lineY, MEDIA_ICON_SIZE);
+                    else if (mediaType[i] == MediaLineType::PICTURE)
+                        drawCameraIcon(display, drawX, lineY, MEDIA_ICON_SIZE);
+
+                    drawStringWithEmotes(display, drawX + iconOffset, lineY, cachedLines[i], emotes, numEmotes);
                 }
             }
         }
@@ -1176,6 +1257,35 @@ void setThreadFor(const StoredMessage &sm, const meshtastic_MeshPacket &packet)
         uint32_t peer = (sm.sender == localNode) ? packet.to : sm.sender;
         setThreadMode(ThreadMode::DIRECT, -1, peer);
     }
+}
+
+uint32_t getLatestVoiceMemoTransferId()
+{
+    // Search current thread messages for the most recent voice memo
+    for (auto it = messageStore.getLiveMessages().rbegin(); it != messageStore.getLiveMessages().rend(); ++it) {
+        const auto &m = *it;
+
+        // Filter by current thread mode
+        bool include = false;
+        switch (currentMode) {
+        case ThreadMode::ALL:
+            include = true;
+            break;
+        case ThreadMode::CHANNEL:
+            if (m.type == MessageType::BROADCAST && (int)m.channelIndex == currentChannel)
+                include = true;
+            break;
+        case ThreadMode::DIRECT:
+            if (m.dest != NODENUM_BROADCAST && (m.sender == currentPeer || m.dest == currentPeer))
+                include = true;
+            break;
+        }
+
+        if (include && m.isVoiceMemo && m.voiceMemoTransferId != 0) {
+            return m.voiceMemoTransferId;
+        }
+    }
+    return 0;
 }
 
 } // namespace MessageRenderer

@@ -208,6 +208,8 @@
 #define HW_VENDOR meshtastic_HardwareModel_HELTEC_WIRELESS_TRACKER_V2
 #elif defined(M5STACK_CARDPUTER_ADV)
 #define HW_VENDOR meshtastic_HardwareModel_M5STACK_CARDPUTER_ADV
+#elif defined(LILYGO_TBEAM_BPF)
+#define HW_VENDOR meshtastic_HardwareModel_TBEAM_BPF
 #else
 #define HW_VENDOR meshtastic_HardwareModel_PRIVATE_HW
 #endif

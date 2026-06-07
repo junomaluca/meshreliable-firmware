@@ -9,6 +9,7 @@
 #include "modules/TrafficManagementModule.h"
 #endif
 #include "NodeDB.h"
+#include "modules/CrossBandModule.h"
 
 NextHopRouter::NextHopRouter() {}
 
@@ -30,9 +31,10 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
     p->next_hop = getNextHop(p->to, p->relay_node).value_or(NO_NEXT_HOP_PREFERENCE); // set the next hop
     LOG_DEBUG("Setting next hop for packet with dest %x to %x", p->to, p->next_hop);
 
-    // If it's from us, ReliableRouter already handles retransmissions if want_ack is set. If a next hop is set and hop limit is
-    // not 0 or want_ack is set, start retransmissions
-    if ((!isFromUs(p) || !p->want_ack) && p->next_hop != NO_NEXT_HOP_PREFERENCE && (p->hop_limit > 0 || p->want_ack))
+    // If it's from us, ReliableRouter already handles retransmissions if want_ack is set.
+    // Only start NextHop retransmissions for RELAYED packets (not from us).
+    // Locally originated want_ack=false packets should NOT be retransmitted — they're fire-and-forget.
+    if (!isFromUs(p) && p->next_hop != NO_NEXT_HOP_PREFERENCE && (p->hop_limit > 0 || p->want_ack))
         startRetransmission(packetPool.allocCopy(*p)); // start retransmission for relayed packet
 
     return Router::send(p);
@@ -290,7 +292,7 @@ PendingPacket *NextHopRouter::startPersistentRetransmission(meshtastic_MeshPacke
 
     // Read config with defaults
     auto cfg = moduleConfig.reliable_message;
-    uint32_t initialInterval = cfg.initial_retry_interval_ms > 0 ? cfg.initial_retry_interval_ms : 15000;
+    uint32_t initialInterval = cfg.initial_retry_interval_ms > 0 ? cfg.initial_retry_interval_ms : 8000;
 
     stopRetransmission(getFrom(p), p->id);
 
@@ -329,8 +331,8 @@ int32_t NextHopRouter::doRetransmissions()
             if (p.persistentRetry) {
                 // --- MeshReliable: Persistent retry mode ---
                 auto cfg = moduleConfig.reliable_message;
-                uint32_t windowMs = (cfg.retry_window_seconds > 0 ? cfg.retry_window_seconds : 3600) * 1000UL;
-                uint32_t maxInterval = cfg.max_retry_interval_ms > 0 ? cfg.max_retry_interval_ms : 300000;
+                uint32_t windowMs = (cfg.retry_window_seconds > 0 ? cfg.retry_window_seconds : 86400) * 1000UL;
+                uint32_t maxInterval = cfg.max_retry_interval_ms > 0 ? cfg.max_retry_interval_ms : 120000;
                 uint32_t battThreshold = cfg.battery_throttle_threshold > 0 ? cfg.battery_throttle_threshold : 20;
 
                 uint32_t elapsed = now - p.retryStartMsec;
@@ -358,16 +360,35 @@ int32_t NextHopRouter::doRetransmissions()
                     }
 
                     if (!batteryPause) {
-                        LOG_DEBUG("Persistent DM retransmission 0x%x->0x%x (id=0x%x), interval=%ums, elapsed=%us/%us",
+                        p.persistentRetryCount++;
+
+                        // Multi-band retry: on odd retries try alternate band (2.4 GHz) if dual-band radio
+                        bool useAlternateBand = false;
+#ifndef DISABLE_WIDELORA_MULTIBAND
+                        if (iface && iface->wideLora() && (p.persistentRetryCount % 2 == 1)) {
+                            useAlternateBand = true;
+                        }
+#endif
+
+                        LOG_DEBUG("Persistent DM retransmission 0x%x->0x%x (id=0x%x), interval=%ums, elapsed=%us/%us%s",
                                   p.packet->from, p.packet->to, p.packet->id,
-                                  p.currentIntervalMs, elapsed / 1000, windowMs / 1000);
+                                  p.currentIntervalMs, elapsed / 1000, windowMs / 1000,
+                                  useAlternateBand ? " [2.4GHz]" : "");
+
+                        // Switch to alternate band if needed (restored in completeSending() after TX)
+                        if (useAlternateBand && iface) {
+                            iface->switchBand(true);
+                        }
+
+                        // Boost hop_limit on later retries to reach more distant nodes via relay
+                        if (p.persistentRetryCount >= 4 && p.packet->hop_limit < 7) {
+                            p.packet->hop_limit = min((int)p.packet->hop_limit + 1, 7);
+                        }
 
                         // Send the retransmission - alternate between NextHop and Flooding
                         if (!isBroadcast(p.packet->to)) {
                             // Every 3rd retry, use flooding as fallback
-                            static uint8_t retryCount = 0;
-                            retryCount++;
-                            if (retryCount % 3 == 0) {
+                            if (p.persistentRetryCount % 3 == 0) {
                                 p.packet->next_hop = NO_NEXT_HOP_PREFERENCE;
                                 FloodingRouter::send(packetPool.allocCopy(*p.packet));
                             } else {
@@ -377,8 +398,17 @@ int32_t NextHopRouter::doRetransmissions()
                             FloodingRouter::send(packetPool.allocCopy(*p.packet));
                         }
 
-                        // Exponential backoff: double the interval, cap at max
-                        p.currentIntervalMs = min(p.currentIntervalMs * 2, maxInterval);
+                        // Band is restored automatically in completeSending() after TX
+
+                        // Exponential backoff: 1.5x for sub-GHz, 1.25x for VHF amateur (100% duty cycle)
+                        auto region = config.lora.region;
+                        bool vhfBand = (region == meshtastic_Config_LoRaConfig_RegionCode_ITU1_2M ||
+                                        region == meshtastic_Config_LoRaConfig_RegionCode_ITU2_2M ||
+                                        region == meshtastic_Config_LoRaConfig_RegionCode_ITU3_2M);
+                        if (vhfBand)
+                            p.currentIntervalMs = min(p.currentIntervalMs * 5 / 4, maxInterval); // 1.25x
+                        else
+                            p.currentIntervalMs = min(p.currentIntervalMs * 3 / 2, maxInterval); // 1.5x
 
                         // Battery throttle: double interval again if battery is low
                         uint32_t effectiveInterval = p.currentIntervalMs;

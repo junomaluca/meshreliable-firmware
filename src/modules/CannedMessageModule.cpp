@@ -27,7 +27,11 @@
 #include "mesh/generated/meshtastic/cannedmessages.pb.h"
 #include "modules/AdminModule.h"
 #include "modules/ExternalNotificationModule.h" // for buzzer control
+#include "PowerFSM.h"
 extern MessageStore messageStore;
+#ifdef HAS_VOICE_MEMO
+#include "modules/esp32/VoiceMemoModule.h"
+#endif
 #if HAS_TRACKBALL
 #include "input/TrackballInterruptImpl1.h"
 #endif
@@ -172,6 +176,9 @@ int CannedMessageModule::splitConfiguredMessages()
     if (osk_found && screen) {
         tempMessages[tempCount++] = "[-- Free Text --]";
     }
+#endif
+#ifdef HAS_VOICE_MEMO
+    tempMessages[tempCount++] = "[-- Voice Memo --]";
 #endif
 
     // First message always starts at buffer start
@@ -446,6 +453,11 @@ int CannedMessageModule::handleInputEvent(const InputEvent *event)
     // If sending, block all input except global/system (handled above)
     case CANNED_MESSAGE_RUN_STATE_EMOTE_PICKER:
         return handleEmotePickerInput(event);
+
+#ifdef HAS_VOICE_MEMO
+    case CANNED_MESSAGE_RUN_STATE_VOICE_RECORDING:
+        return handleVoiceRecordingInput(event);
+#endif
 
     case CANNED_MESSAGE_RUN_STATE_INACTIVE:
         if (event->inputEvent == INPUT_BROKER_ALT_LONG) {
@@ -782,6 +794,25 @@ bool CannedMessageModule::handleMessageSelectorInput(const InputEvent *event, bo
         }
 #endif
 
+#ifdef HAS_VOICE_MEMO
+        // [Voice Memo] triggers voice recording
+        if (strcmp(current, "[-- Voice Memo --]") == 0) {
+            voiceRecordingSelection = 0; // Always reset to Submit before entering recording screen
+            if (voiceMemoModule && !voiceMemoModule->isRecording() && voiceMemoModule->startRecording(31000)) {
+                voiceRecordingBlinkOn = true;
+                voiceRecordingBlinkTime = millis();
+                voiceRecordingStartTime = millis();
+                updateState(CANNED_MESSAGE_RUN_STATE_VOICE_RECORDING, true);
+                setIntervalFromNow(100); // Wake up OSThread so runOnce() fires for auto-submit timer
+                UIFrameEvent e;
+                e.action = UIFrameEvent::Action::REGENERATE_FRAMESET;
+                notifyObservers(&e);
+                screen->forceDisplay();
+            }
+            return true;
+        }
+#endif
+
         // Normal canned message selection
         if (runState == CANNED_MESSAGE_RUN_STATE_INACTIVE || runState == CANNED_MESSAGE_RUN_STATE_DISABLED) {
         } else {
@@ -1028,6 +1059,110 @@ int CannedMessageModule::handleEmotePickerInput(const InputEvent *event)
     return 0;
 }
 
+#ifdef HAS_VOICE_MEMO
+void CannedMessageModule::voiceRecordingSubmit()
+{
+    // Defer the heavy work (mic deinit, compression, transfer start) to runOnce()
+    // so the UI updates immediately and the device stays responsive.
+    voiceSubmitPending = true;
+    voiceSubmitDest = dest;
+    voiceSubmitChannel = channel;
+
+    // Return to normal screen immediately
+    updateState(CANNED_MESSAGE_RUN_STATE_ACTIVE);
+    currentMessageIndex = -1;
+    UIFrameEvent e;
+    e.action = UIFrameEvent::Action::REGENERATE_FRAMESET;
+    notifyObservers(&e);
+    screen->forceDisplay();
+    setIntervalFromNow(50); // Wake runOnce() quickly to process the deferred submit
+}
+
+void CannedMessageModule::voiceRecordingCancel()
+{
+    if (voiceMemoModule)
+        voiceMemoModule->cancelRecording();
+    updateState(CANNED_MESSAGE_RUN_STATE_ACTIVE);
+    currentMessageIndex = -1;
+    UIFrameEvent e;
+    e.action = UIFrameEvent::Action::REGENERATE_FRAMESET;
+    notifyObservers(&e);
+    screen->forceDisplay();
+}
+
+int CannedMessageModule::handleVoiceRecordingInput(const InputEvent *event)
+{
+    // Quick click (USER_PRESS / ALT_PRESS) or UP/DOWN: toggle Submit/Cancel
+    if (event->inputEvent == INPUT_BROKER_USER_PRESS ||
+        event->inputEvent == INPUT_BROKER_ALT_PRESS ||
+        event->inputEvent == INPUT_BROKER_UP ||
+        event->inputEvent == INPUT_BROKER_DOWN ||
+        event->inputEvent == INPUT_BROKER_LEFT ||
+        event->inputEvent == INPUT_BROKER_RIGHT) {
+        voiceRecordingSelection = (voiceRecordingSelection == 0) ? 1 : 0;
+        screen->forceDisplay();
+        return 1;
+    }
+
+    // Cancel button (hardware CANCEL key)
+    if (event->inputEvent == INPUT_BROKER_CANCEL || event->inputEvent == INPUT_BROKER_ALT_LONG) {
+        voiceRecordingCancel();
+        return 1;
+    }
+
+    // Select (long press on single-button, or SELECT on multi-button): confirm selection
+    if (event->inputEvent == INPUT_BROKER_SELECT || event->inputEvent == INPUT_BROKER_SELECT_LONG) {
+        if (voiceRecordingSelection == 0) {
+            voiceRecordingSubmit();
+        } else {
+            voiceRecordingCancel();
+        }
+        return 1;
+    }
+
+    return 1;
+}
+
+void CannedMessageModule::drawVoiceRecordingScreen(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t x, int16_t y)
+{
+    display->clear();
+    display->setTextAlignment(TEXT_ALIGN_CENTER);
+    display->setFont(FONT_SMALL);
+
+    // Title
+    display->drawString(x + display->getWidth() / 2, y + 0, "Voice Memo");
+
+    // Blinking record indicator (toggle every 500ms)
+    uint32_t now = millis();
+    if (now - voiceRecordingBlinkTime > 500) {
+        voiceRecordingBlinkOn = !voiceRecordingBlinkOn;
+        voiceRecordingBlinkTime = now;
+    }
+    if (voiceRecordingBlinkOn) {
+        display->fillCircle(x + 20, y + 22, 5); // Solid dot = recording
+    }
+    display->drawString(x + display->getWidth() / 2, y + 16, "REC");
+
+    // Timer — use our own start time tracking so we still show elapsed time after auto-stop
+    uint32_t elapsedMs = now - voiceRecordingStartTime;
+    int secs = elapsedMs / 1000;
+    if (secs > 30) secs = 30;
+    char timerBuf[16];
+    snprintf(timerBuf, sizeof(timerBuf), "%02d / 30s", secs);
+    display->setFont(FONT_MEDIUM);
+    display->drawString(x + display->getWidth() / 2, y + 28, timerBuf);
+
+    // Submit / Cancel buttons
+    display->setFont(FONT_SMALL);
+    display->setTextAlignment(TEXT_ALIGN_CENTER);
+
+    const char *submitLabel = (voiceRecordingSelection == 0) ? "> Submit <" : "  Submit  ";
+    const char *cancelLabel = (voiceRecordingSelection == 1) ? "> Cancel <" : "  Cancel  ";
+    display->drawString(x + display->getWidth() / 4, y + 50, submitLabel);
+    display->drawString(x + (display->getWidth() * 3) / 4, y + 50, cancelLabel);
+}
+#endif
+
 void CannedMessageModule::sendText(NodeNum dest, ChannelIndex channel, const char *message, bool wantReplies)
 {
     lastDest = dest;
@@ -1149,6 +1284,46 @@ int32_t CannedMessageModule::runOnce()
     if (this->runState == CANNED_MESSAGE_RUN_STATE_DESTINATION_SELECTION) {
         return INACTIVATE_AFTER_MS;
     }
+
+#ifdef HAS_VOICE_MEMO
+    // Process deferred voice memo submit (runs after UI has already updated)
+    if (voiceSubmitPending) {
+        voiceSubmitPending = false;
+        if (voiceMemoModule) {
+            uint32_t transferId = voiceMemoModule->stopAndSend(voiceSubmitDest, voiceSubmitChannel);
+            if (transferId != 0) {
+                StoredMessage sm;
+                uint32_t nowSecs = getValidTime(RTCQuality::RTCQualityDevice, false);
+                sm.timestamp = (nowSecs > 0) ? nowSecs : millis() / 1000;
+                sm.isBootRelative = (nowSecs == 0);
+                sm.sender = myNodeInfo.my_node_num;
+                sm.channelIndex = voiceSubmitChannel;
+                sm.dest = voiceSubmitDest;
+                sm.type = (voiceSubmitDest == NODENUM_BROADCAST) ? MessageType::BROADCAST : MessageType::DM_TO_US;
+                sm.isVoiceMemo = true;
+                sm.voiceMemoTransferId = transferId;
+                sm.textOffset = MessageStore::storeText("[voice memo]", 12);
+                sm.textLength = 12;
+                messageStore.addLiveMessage(std::move(sm));
+            }
+        }
+        return 500;
+    }
+
+    // Keep screen alive and redraw during voice recording
+    if (this->runState == CANNED_MESSAGE_RUN_STATE_VOICE_RECORDING) {
+        uint32_t elapsedMs = millis() - voiceRecordingStartTime;
+        bool vmRecording = voiceMemoModule && voiceMemoModule->isRecording();
+        if (elapsedMs >= 30000 || !vmRecording) {
+            voiceRecordingSubmit();
+            return 500;
+        }
+        // Keep the screen on so InputBroker doesn't drop button events after screen timeout
+        powerFSM.trigger(EVENT_INPUT);
+        screen->forceDisplay();
+        return 100; // Redraw every 100ms for timer/blink updates
+    }
+#endif
 
     // Normal module disable/idle handling
     if ((this->runState == CANNED_MESSAGE_RUN_STATE_DISABLED) || (this->runState == CANNED_MESSAGE_RUN_STATE_INACTIVE)) {
@@ -1430,7 +1605,8 @@ bool CannedMessageModule::shouldDraw()
     // Only allow drawing when we're in an interactive UI state.
     return (this->runState == CANNED_MESSAGE_RUN_STATE_ACTIVE || this->runState == CANNED_MESSAGE_RUN_STATE_FREETEXT ||
             this->runState == CANNED_MESSAGE_RUN_STATE_DESTINATION_SELECTION ||
-            this->runState == CANNED_MESSAGE_RUN_STATE_EMOTE_PICKER);
+            this->runState == CANNED_MESSAGE_RUN_STATE_EMOTE_PICKER ||
+            this->runState == CANNED_MESSAGE_RUN_STATE_VOICE_RECORDING);
 }
 
 // Has the user defined any canned messages?
@@ -1889,13 +2065,22 @@ void CannedMessageModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiState *st
 
     // Never draw if state is outside our UI modes
     if (!(runState == CANNED_MESSAGE_RUN_STATE_ACTIVE || runState == CANNED_MESSAGE_RUN_STATE_FREETEXT ||
-          runState == CANNED_MESSAGE_RUN_STATE_DESTINATION_SELECTION || runState == CANNED_MESSAGE_RUN_STATE_EMOTE_PICKER)) {
+          runState == CANNED_MESSAGE_RUN_STATE_DESTINATION_SELECTION || runState == CANNED_MESSAGE_RUN_STATE_EMOTE_PICKER ||
+          runState == CANNED_MESSAGE_RUN_STATE_VOICE_RECORDING)) {
         return; // bail if not in a UI state that should render
     }
 
+#ifdef HAS_VOICE_MEMO
+    // Voice Recording Screen
+    if (this->runState == CANNED_MESSAGE_RUN_STATE_VOICE_RECORDING) {
+        drawVoiceRecordingScreen(display, state, x, y);
+        return;
+    }
+#endif
+
     // Emote Picker Screen
     if (this->runState == CANNED_MESSAGE_RUN_STATE_EMOTE_PICKER) {
-        drawEmotePickerScreen(display, state, x, y); // <-- Call your emote picker drawer here
+        drawEmotePickerScreen(display, state, x, y);
         return;
     }
 
@@ -2301,7 +2486,11 @@ bool CannedMessageModule::saveProtoForModule()
  */
 void CannedMessageModule::installDefaultCannedMessageModuleConfig()
 {
+#ifdef USERPREFS_CANNED_MESSAGES
+    strncpy(cannedMessageModuleConfig.messages, USERPREFS_CANNED_MESSAGES, sizeof(cannedMessageModuleConfig.messages));
+#else
     strncpy(cannedMessageModuleConfig.messages, "Hi|Bye|Yes|No|Ok", sizeof(cannedMessageModuleConfig.messages));
+#endif
 }
 
 /**

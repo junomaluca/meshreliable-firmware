@@ -1,8 +1,11 @@
 #include "CrossBandModule.h"
+#include <pb_encode.h>
 #include "MeshService.h"
 #include "NodeDB.h"
 #include "Router.h"
 #include "configuration.h"
+#include "mqtt/MQTT.h"
+#include "mesh/Channels.h"
 
 CrossBandModule *crossBandModule = nullptr;
 
@@ -31,6 +34,10 @@ meshtastic_FrequencyBand CrossBandModule::detectOwnBand() const
         return meshtastic_FrequencyBand_BAND_ANZ_915;
     case meshtastic_Config_LoRaConfig_RegionCode_EU_433:
         return meshtastic_FrequencyBand_BAND_EU_433;
+    case meshtastic_Config_LoRaConfig_RegionCode_ITU1_2M:
+    case meshtastic_Config_LoRaConfig_RegionCode_ITU2_2M:
+    case meshtastic_Config_LoRaConfig_RegionCode_ITU3_2M:
+        return meshtastic_FrequencyBand_BAND_HAM_144;
     default:
         return meshtastic_FrequencyBand_BAND_UNKNOWN;
     }
@@ -222,6 +229,12 @@ void CrossBandModule::handleBandAdvertisement(const meshtastic_MeshPacket &mp,
 void CrossBandModule::handleBridgedMessage(const meshtastic_MeshPacket &mp,
                                             const meshtastic_CrossBandMessage &decoded)
 {
+    // Validate original_message_id — 0 is unset/invalid and would poison the dedup window
+    if (decoded.original_message_id == 0) {
+        LOG_WARN("CrossBand: dropping bridged msg with original_message_id=0 (invalid)");
+        return;
+    }
+
     // Anti-loop: check if this message was already bridged
     if (wasRecentlyBridged(decoded.original_message_id)) {
         LOG_DEBUG("CrossBand: dedup — already bridged msg %u", decoded.original_message_id);
@@ -248,11 +261,14 @@ void CrossBandModule::handleBridgedMessage(const meshtastic_MeshPacket &mp,
              decoded.original_message_id, decoded.source_band, decoded.bridge_ttl,
              decoded.bridged_payload_size);
 
-    // If we're a dual-band device, we could re-bridge onto our other band
-    // For now, just inject the bridged payload into the local mesh
+    // Re-inject the bridged payload into the local mesh
     if (decoded.bridged_payload_size > 0 && decoded.original_portnum > 0) {
-        // The bridged payload contains the raw protobuf of the original message
-        // Re-inject it into the local mesh with the original portnum
+        // Prevent recursive bridging — don't re-inject CROSS_BAND_APP packets
+        if ((meshtastic_PortNum)decoded.original_portnum == meshtastic_PortNum_CROSS_BAND_APP) {
+            LOG_WARN("CrossBand: refusing to re-inject CROSS_BAND_APP packet (recursive bridge)");
+            return;
+        }
+
         meshtastic_MeshPacket *p = allocDataPacket();
         if (p) {
             p->to = decoded.original_dest;
@@ -267,6 +283,9 @@ void CrossBandModule::handleBridgedMessage(const meshtastic_MeshPacket &mp,
                      decoded.original_message_id, decoded.original_portnum);
         }
     }
+
+    // Forward via MQTT AFTER local re-injection (and only if we successfully re-injected)
+    publishBridgedMessageToMqtt(decoded);
 }
 
 void CrossBandModule::handleBandDiscoveryRequest(const meshtastic_MeshPacket &mp,
@@ -353,4 +372,97 @@ void CrossBandModule::sendCrossBandPacket(const meshtastic_CrossBandMessage &pay
     p->decoded.want_response = false;
     p->priority = meshtastic_MeshPacket_Priority_DEFAULT;
     service->sendToMesh(p);
+}
+
+const char *CrossBandModule::bandToString(meshtastic_FrequencyBand band)
+{
+    switch (band) {
+    case meshtastic_FrequencyBand_BAND_US_915: return "us915";
+    case meshtastic_FrequencyBand_BAND_EU_868: return "eu868";
+    case meshtastic_FrequencyBand_BAND_CN_470: return "cn470";
+    case meshtastic_FrequencyBand_BAND_JP_920: return "jp920";
+    case meshtastic_FrequencyBand_BAND_IN_865: return "in865";
+    case meshtastic_FrequencyBand_BAND_ANZ_915: return "anz915";
+    case meshtastic_FrequencyBand_BAND_ISM_2400: return "ism2400";
+    case meshtastic_FrequencyBand_BAND_HAM_144: return "ham144";
+    case meshtastic_FrequencyBand_BAND_EU_433: return "eu433";
+    default: return "unknown";
+    }
+}
+
+uint32_t CrossBandModule::getDutyCycleSubGhzPercent() const
+{
+    uint32_t pct = 70; // default 70% sub-GHz
+    if (moduleConfig.has_cross_band && moduleConfig.cross_band.duty_cycle_sub_ghz_percent > 0) {
+        pct = moduleConfig.cross_band.duty_cycle_sub_ghz_percent;
+        if (pct < 10) pct = 10;
+        if (pct > 90) pct = 90;
+    }
+    return pct;
+}
+
+bool CrossBandModule::shouldUse24GHz() const
+{
+    if (!isOwnDeviceDualBand()) {
+        return false; // single-band device, always use sub-GHz
+    }
+
+    uint32_t now = millis();
+
+    // Reset window if expired (use mutable cast since this is a tracking counter)
+    auto *self = const_cast<CrossBandModule *>(this);
+    if (now - dutyCycleWindowStart >= DUTY_CYCLE_WINDOW_MS) {
+        self->dutyCycleWindowStart = now;
+        self->subGhzTxCount = 0;
+        self->ism24TxCount = 0;
+    }
+
+    uint32_t totalTx = subGhzTxCount + ism24TxCount;
+    if (totalTx == 0) {
+        // First transmission in window — use sub-GHz
+        self->subGhzTxCount++;
+        return false;
+    }
+
+    uint32_t subGhzPct = getDutyCycleSubGhzPercent();
+    uint32_t currentSubGhzPct = (subGhzTxCount * 100) / totalTx;
+
+    if (currentSubGhzPct >= subGhzPct) {
+        // Sub-GHz has exceeded its allocation, use 2.4 GHz
+        self->ism24TxCount++;
+        return true;
+    } else {
+        self->subGhzTxCount++;
+        return false;
+    }
+}
+
+void CrossBandModule::publishBridgedMessageToMqtt(const meshtastic_CrossBandMessage &msg)
+{
+#if HAS_NETWORKING
+    if (!mqtt || !mqtt->isConnectedDirectly()) {
+        LOG_DEBUG("CrossBand: MQTT not connected, skipping bridge publish");
+        return;
+    }
+
+    // Build topic: msh/bridge/{source_band}/{channel_hash}
+    char topic[128];
+    const char *bandStr = bandToString(msg.source_band);
+    snprintf(topic, sizeof(topic), "msh/bridge/%s/%08x", bandStr, msg.original_channel);
+
+    // Encode the CrossBandMessage to binary for MQTT transport
+    uint8_t buffer[meshtastic_CrossBandMessage_size];
+    pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+    if (!pb_encode(&stream, meshtastic_CrossBandMessage_fields, &msg)) {
+        LOG_ERROR("CrossBand: failed to encode bridge message for MQTT");
+        return;
+    }
+
+    if (mqtt->publish(topic, buffer, stream.bytes_written, false)) {
+        LOG_INFO("CrossBand: published bridge msg %u to MQTT topic %s (%u bytes)",
+                 msg.original_message_id, topic, stream.bytes_written);
+    } else {
+        LOG_WARN("CrossBand: failed to publish bridge msg to MQTT");
+    }
+#endif
 }

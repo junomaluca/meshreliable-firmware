@@ -75,6 +75,7 @@ extern MessageStore messageStore;
 #endif
 
 #ifdef ARCH_ESP32
+#include "modules/esp32/VoiceMemoModule.h"
 #endif
 
 #if ARCH_PORTDUINO
@@ -1593,6 +1594,9 @@ void Screen::showFrame(FrameDirection direction)
             logFrameChange(direction == FrameDirection::NEXT ? "next" : "prev", target);
         }
 #endif
+        LOG_WARN("BTN-DBG: showFrame ADVANCING %s from frame %u/%u",
+                 direction == FrameDirection::NEXT ? "NEXT" : "PREV",
+                 ui->getUiState()->currentFrame, framesetInfo.frameCount);
 
         if (direction == FrameDirection::NEXT) {
             ui->nextFrame();
@@ -1602,6 +1606,8 @@ void Screen::showFrame(FrameDirection direction)
 
         lastScreenTransition = millis();
         setFastFramerate();
+    } else {
+        LOG_WARN("BTN-DBG: showFrame BLOCKED frameState=%d (not FIXED)", ui->getUiState()->frameState);
     }
 }
 
@@ -1685,9 +1691,19 @@ int Screen::handleUIFrameEvent(const UIFrameEvent *event)
 
 int Screen::handleInputEvent(const InputEvent *event)
 {
-    LOG_INPUT("Screen Input event %u! kb %u", event->inputEvent, event->kbchar);
-    if (!screenOn)
-        return 0;
+    LOG_WARN("BTN-DBG: handleInputEvent evt=%u screenOn=%d showingNormal=%d", event->inputEvent, screenOn, showingNormalScreen);
+    if (!screenOn) {
+        // Boot button (USER_PRESS) should wake screen AND advance frame.
+        // powerFSM wakes the screen asynchronously, so screenOn may still be false
+        // when this handler runs. Force screen on and continue processing.
+        if (event->inputEvent == INPUT_BROKER_USER_PRESS) {
+            LOG_WARN("BTN-DBG: screen was OFF, forcing ON for USER_PRESS");
+            handleSetOn(true);
+        } else {
+            LOG_WARN("BTN-DBG: screen OFF, dropping non-USER_PRESS event");
+            return 0;
+        }
+    }
 
     // Handle text input notifications specially - pass input to virtual keyboard
     if (NotificationRenderer::current_notification_type == notificationTypeEnum::text_input) {
@@ -1706,6 +1722,7 @@ int Screen::handleInputEvent(const InputEvent *event)
     setFastFramerate();                       // Draw ASAP
 #endif
     if (NotificationRenderer::isOverlayBannerShowing()) {
+        LOG_WARN("BTN-DBG: overlay banner INTERCEPTING evt=%u (banner shown, event consumed)", event->inputEvent);
         NotificationRenderer::inEvent = *event;
         static OverlayCallback overlays[] = {graphics::UIRenderer::drawNavigationBar, NotificationRenderer::drawBannercallback};
         ui->setOverlays(overlays, 2);
@@ -1764,8 +1781,10 @@ int Screen::handleInputEvent(const InputEvent *event)
         // Ask any MeshModules if they're handling keyboard input right now
         bool inputIntercepted = false;
         for (MeshModule *module : moduleFrames) {
-            if (module && module->interceptingKeyboardInput())
+            if (module && module->interceptingKeyboardInput()) {
                 inputIntercepted = true;
+                LOG_WARN("BTN-DBG: module intercepting keyboard input");
+            }
         }
 
         // If no modules are using the input, move between frames
@@ -1791,8 +1810,16 @@ int Screen::handleInputEvent(const InputEvent *event)
             }
 #endif
             if (event->inputEvent == INPUT_BROKER_LEFT || event->inputEvent == INPUT_BROKER_ALT_PRESS) {
+                LOG_WARN("BTN-DBG: showFrame(PREV) curFrame=%u frameCount=%u frameState=%d",
+                         ui->getUiState()->currentFrame, framesetInfo.frameCount, ui->getUiState()->frameState);
                 showFrame(FrameDirection::PREVIOUS);
-            } else if (event->inputEvent == INPUT_BROKER_RIGHT || event->inputEvent == INPUT_BROKER_USER_PRESS) {
+            } else if (event->inputEvent == INPUT_BROKER_RIGHT || event->inputEvent == INPUT_BROKER_USER_PRESS ||
+                       event->inputEvent == INPUT_BROKER_CANCEL) {
+                // CANCEL (PMU power button) also advances frame when screen is on.
+                // This makes the power button useful for navigation instead of just toggling screen off.
+                LOG_WARN("BTN-DBG: showFrame(NEXT) curFrame=%u frameCount=%u frameState=%d evt=%u",
+                         ui->getUiState()->currentFrame, framesetInfo.frameCount, ui->getUiState()->frameState,
+                         event->inputEvent);
                 showFrame(FrameDirection::NEXT);
             } else if (event->inputEvent == INPUT_BROKER_FN_F1) {
                 this->ui->switchToFrame(0);
@@ -1853,7 +1880,24 @@ int Screen::handleInputEvent(const InputEvent *event)
                     menuHandler::loraMenu();
                 } else if (this->ui->getUiState()->currentFrame == framesetInfo.positions.textMessage) {
                     if (!messageStore.getMessages().empty()) {
-                        menuHandler::messageResponseMenu();
+#ifdef ARCH_ESP32
+                        // Check if the current thread has a voice memo to play
+                        uint32_t vmTransferId = graphics::MessageRenderer::getLatestVoiceMemoTransferId();
+                        if (vmTransferId != 0 && voiceMemoModule) {
+                            if (voiceMemoModule->isPlaying()) {
+                                voiceMemoModule->stopPlayback();
+                            } else {
+                                auto *memo = voiceMemoModule->getMemo(vmTransferId);
+                                if (memo) {
+                                    voiceMemoModule->playVoiceMemo(memo->data.data(), memo->data.size());
+                                }
+                            }
+                            setFastFramerate();
+                        } else
+#endif
+                        {
+                            menuHandler::messageResponseMenu();
+                        }
                     } else {
                         if (currentResolution == ScreenResolution::UltraLow) {
                             menuHandler::textMessageMenu();
@@ -1878,10 +1922,10 @@ int Screen::handleInputEvent(const InputEvent *event)
                 }
             } else if (event->inputEvent == INPUT_BROKER_BACK) {
                 showFrame(FrameDirection::PREVIOUS);
-            } else if (event->inputEvent == INPUT_BROKER_CANCEL) {
-                setOn(false);
             }
         }
+    } else {
+        LOG_WARN("BTN-DBG: showingNormalScreen=FALSE, evt=%u NOT handled for frame advance", event->inputEvent);
     }
 
     return 0;

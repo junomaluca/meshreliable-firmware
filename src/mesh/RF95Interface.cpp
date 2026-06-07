@@ -183,6 +183,7 @@ bool RF95Interface::init()
     LOG_INFO("Frequency set to %f", getFreq());
     LOG_INFO("Bandwidth set to %f", bw);
     LOG_INFO("Power output set to %d", power);
+
 #if defined(RADIOMASTER_900_BANDIT_NANO) || defined(RADIOMASTER_900_BANDIT)
     LOG_INFO("DAC output set to %d", powerDAC);
 #endif
@@ -222,19 +223,22 @@ bool RF95Interface::reconfigure()
         RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_INVALID_RADIO_SETTING);
 
     err = lora->setSyncWord(syncWord);
-    if (err != RADIOLIB_ERR_NONE)
+    if (err != RADIOLIB_ERR_NONE) {
         LOG_ERROR("RF95 setSyncWord %s%d", radioLibErr, err);
-    assert(err == RADIOLIB_ERR_NONE);
+        RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_RADIO_SPI_BUG);
+    }
 
     err = lora->setCurrentLimit(currentLimit);
-    if (err != RADIOLIB_ERR_NONE)
+    if (err != RADIOLIB_ERR_NONE) {
         LOG_ERROR("RF95 setCurrentLimit %s%d", radioLibErr, err);
-    assert(err == RADIOLIB_ERR_NONE);
+        RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_RADIO_SPI_BUG);
+    }
 
     err = lora->setPreambleLength(preambleLength);
-    if (err != RADIOLIB_ERR_NONE)
+    if (err != RADIOLIB_ERR_NONE) {
         LOG_ERROR("RF95 setPreambleLength %s%d", radioLibErr, err);
-    assert(err == RADIOLIB_ERR_NONE);
+        RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_RADIO_SPI_BUG);
+    }
 
     err = lora->setFrequency(getFreq());
     if (err != RADIOLIB_ERR_NONE)
@@ -292,9 +296,17 @@ void RF95Interface::startReceive()
     setTransmitEnable(false);
     setStandby();
     int err = lora->startReceive();
-    if (err != RADIOLIB_ERR_NONE)
-        LOG_ERROR("RF95 startReceive %s%d", radioLibErr, err);
-    assert(err == RADIOLIB_ERR_NONE);
+    if (err != RADIOLIB_ERR_NONE) {
+        LOG_ERROR("RF95 startReceive %s%d — retrying", radioLibErr, err);
+        delay(10);
+        setStandby();
+        err = lora->startReceive();
+        if (err != RADIOLIB_ERR_NONE) {
+            LOG_ERROR("RF95 startReceive retry failed %s%d", radioLibErr, err);
+            RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_RADIO_SPI_BUG);
+            return;
+        }
+    }
 
     isReceiving = true;
 
@@ -305,21 +317,12 @@ void RF95Interface::startReceive()
 
 bool RF95Interface::isChannelActive()
 {
-    // check if we can detect a LoRa preamble on the current channel
-    int16_t result;
-    setTransmitEnable(false);
-    setStandby(); // needed for smooth transition
-    result = lora->scanChannel();
-
-    if (result == RADIOLIB_PREAMBLE_DETECTED) {
-        // LOG_DEBUG("Channel is busy!");
-        return true;
-    }
-    if (result != RADIOLIB_CHANNEL_FREE)
-        LOG_ERROR("RF95 isChannelActive %s%d", radioLibErr, result);
-    assert(result != RADIOLIB_ERR_WRONG_MODEM);
-
-    // LOG_DEBUG("Channel is free!");
+    // Skip CAD (Channel Activity Detection) and assume channel is free.
+    // SX127x scanChannel() polls DIO0/DIO1 GPIOs in a blocking loop.
+    // On boards where DIO0 isn't routed for GPIO polling (e.g. T-Beam Supreme
+    // VHF with SX1276), this hangs indefinitely. TX/RX completion uses the
+    // firmware's backup polling mechanism ("caught missed TX_DONE/RX_DONE")
+    // instead of the DIO0 interrupt, so communication still works.
     return false;
 }
 
@@ -327,6 +330,36 @@ bool RF95Interface::isChannelActive()
 bool RF95Interface::isActivelyReceiving()
 {
     return lora->isReceiving();
+}
+
+void RF95Interface::resetAGC()
+{
+    // SX127x continuous RX can go deaf after prolonged idle — the AGC/LNA
+    // gain drifts and the receiver stops detecting preambles.  A plain
+    // standby→RX cycle does NOT reset the analog frontend on SX127x.
+    // We need a full SLEEP cycle to power-down the analog chain, then
+    // re-initialize frequency (which re-sets the LF-mode bit) and CRC.
+    if (sendingPacket || (isReceiving && isActivelyReceiving()))
+        return;
+
+    // 1. Power down — SLEEP mode turns off the analog frontend entirely
+    setStandby();
+    lora->sleep();
+    delay(2); // let analog settle
+
+    // 2. Wake to standby (crystal warm-up)
+    lora->standby();
+    delay(1);
+
+    // 3. Re-apply frequency (also sets LF-mode bit for <525 MHz)
+    lora->setFrequency(getFreq());
+
+    // 4. Re-enable CRC
+    lora->setCRC(RADIOLIB_SX126X_LORA_CRC_ON);
+
+    // 5. Resume receiving with fresh analog state
+    startReceive();
+    LOG_DEBUG("RF95 resetAGC: sleep→standby→freq→RX (freq=%.3f)", getFreq());
 }
 
 bool RF95Interface::sleep()

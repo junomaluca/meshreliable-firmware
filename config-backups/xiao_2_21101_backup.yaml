@@ -1,0 +1,57 @@
+# start of Meshtastic configure yaml
+canned_messages: Hi|Bye|Yes|No|Ok
+channel_url: https://meshtastic.org/e/#CgcSAQE6AggNEg0IAUADSAFQHmgB0AYC
+config:
+  bluetooth:
+    enabled: true
+    fixedPin: 123456
+    mode: FIXED_PIN
+  device:
+    nodeInfoBroadcastSecs: 10800
+  display:
+    screenOnSecs: 600
+  lora:
+    hopLimit: 3
+    sx126xRxBoostedGain: true
+    txEnabled: true
+    txPower: 30
+    usePreset: true
+  network:
+    ntpServer: meshtastic.pool.ntp.org
+  position:
+    broadcastSmartMinimumDistance: 100
+    broadcastSmartMinimumIntervalSecs: 300
+    gpsMode: ENABLED
+    gpsUpdateInterval: 120
+    positionBroadcastSecs: 3600
+    positionBroadcastSmartEnabled: true
+    positionFlags: 811
+  power:
+    lsSecs: 300
+    minWakeSecs: 10
+    sdsSecs: 4294967295
+    waitBluetoothSecs: 60
+  security:
+    serialEnabled: true
+module_config:
+  ambientLighting:
+    blue: 189
+    current: 10
+    green: 143
+    red: 254
+  cannedMessage:
+    enabled: true
+  detectionSensor:
+    detectionTriggerType: LOGIC_HIGH
+    minimumBroadcastSecs: 45
+  mqtt:
+    address: mqtt.meshtastic.org
+    encryptionEnabled: true
+    password: large4cats
+    root: msh
+    username: meshdev
+  telemetry:
+    deviceUpdateInterval: 2147483647
+owner: Meshtastic 15bc
+owner_short: 15bc
+

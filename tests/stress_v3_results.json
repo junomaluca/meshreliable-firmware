@@ -1,0 +1,49 @@
+{
+  "start": "2026-06-02T20:49:44.087967",
+  "phases": {
+    "DM_B_to_A": {
+      "total": 500,
+      "ok": 500,
+      "fail": 0,
+      "rate": "100.0%",
+      "secs": 985.8,
+      "errors": []
+    },
+    "Broadcast": {
+      "total": 500,
+      "ok": 500,
+      "fail": 0,
+      "rate": "100.0%",
+      "secs": 1036.2,
+      "errors": []
+    },
+    "Channel_ch0": {
+      "total": 500,
+      "ok": 500,
+      "fail": 0,
+      "rate": "100.0%",
+      "secs": 1006.7,
+      "errors": []
+    },
+    "Long_msgs": {
+      "total": 100,
+      "ok": 100,
+      "fail": 0,
+      "rate": "100.0%",
+      "secs": 270.3,
+      "errors": []
+    },
+    "Rapid": {
+      "total": 100,
+      "ok": 100,
+      "fail": 0,
+      "rate": "100.0%",
+      "secs": 176.6,
+      "errors": []
+    }
+  },
+  "end": "2026-06-02T21:48:22.612536",
+  "total_ok": 1700,
+  "total_n": 1700,
+  "overall": "100.0%"
+}

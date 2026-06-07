@@ -245,6 +245,20 @@ const RegionInfo regions[] = {
     RDEF(EU_N_868, 869.4f, 869.65f, 10, 27, false, false, PROFILE_NARROW, PRESET(NARROW_SLOW)),
 
     /*
+        Amateur Radio 2m band (144 MHz VHF) - licensed use only, 100% duty cycle
+    */
+    RDEF(ITU1_2M, 144.0f, 146.0f, 100, 30, false, false, PROFILE_STD, PRESET(LONG_FAST)),
+    RDEF(ITU2_2M, 144.0f, 148.0f, 100, 30, false, false, PROFILE_STD, PRESET(LONG_FAST)),
+    RDEF(ITU3_2M, 144.0f, 148.0f, 100, 30, false, false, PROFILE_STD, PRESET(LONG_FAST)),
+
+    /*
+        Amateur Radio 70cm band (430 MHz UHF) - licensed use only, 100% duty cycle
+    */
+    RDEF(ITU1_70CM, 430.0f, 440.0f, 100, 30, false, false, PROFILE_STD, PRESET(LONG_FAST)),
+    RDEF(ITU2_70CM, 420.0f, 450.0f, 100, 30, false, false, PROFILE_STD, PRESET(LONG_FAST)),
+    RDEF(ITU3_70CM, 430.0f, 440.0f, 100, 30, false, false, PROFILE_STD, PRESET(LONG_FAST)),
+
+    /*
         This needs to be last. Same as US.
     */
     RDEF(UNSET, 902.0f, 928.0f, 100, 30, false, false, PROFILE_UNDEF, PRESET(LONG_FAST)),
@@ -335,6 +349,7 @@ std::unique_ptr<RadioInterface> initLoRa()
     RadioLibHAL = loraHal;
 #endif
 
+
 // radio init MUST BE AFTER service.init, so we have our radio config settings (from nodedb init)
 #if defined(USE_STM32WLx)
     if (!rIf) {
@@ -363,7 +378,7 @@ std::unique_ptr<RadioInterface> initLoRa()
     }
 #endif
 
-#if defined(USE_SX1262) && !defined(ARCH_PORTDUINO) && !defined(TCXO_OPTIONAL) && RADIOLIB_EXCLUDE_SX126X != 1
+#if defined(USE_SX1262) && !defined(ARCH_PORTDUINO) && !defined(TCXO_OPTIONAL) && RADIOLIB_EXCLUDE_SX126X != 1 && !defined(SKIP_SX126X_PROBE)
     if ((!rIf) && (config.lora.region != meshtastic_Config_LoRaConfig_RegionCode_LORA_24)) {
         auto sxIf =
             std::unique_ptr<SX1262Interface>(new SX1262Interface(loraHal, SX126X_CS, SX126X_DIO1, SX126X_RESET, SX126X_BUSY));
@@ -381,7 +396,7 @@ std::unique_ptr<RadioInterface> initLoRa()
     }
 #endif
 
-#if defined(USE_SX1262) && !defined(ARCH_PORTDUINO) && defined(TCXO_OPTIONAL)
+#if defined(USE_SX1262) && !defined(ARCH_PORTDUINO) && defined(TCXO_OPTIONAL) && !defined(SKIP_SX126X_PROBE)
     if ((!rIf) && (config.lora.region != meshtastic_Config_LoRaConfig_RegionCode_LORA_24)) {
         // try using the specified TCXO voltage
         auto sxIf =
@@ -410,7 +425,7 @@ std::unique_ptr<RadioInterface> initLoRa()
     }
 #endif
 
-#if defined(USE_SX1268)
+#if defined(USE_SX1268) && !defined(SKIP_SX126X_PROBE)
 #if defined(SX126X_DIO3_TCXO_VOLTAGE) && defined(TCXO_OPTIONAL)
     if ((!rIf) && (config.lora.region != meshtastic_Config_LoRaConfig_RegionCode_LORA_24)) {
         // try using the specified TCXO voltage
@@ -428,12 +443,17 @@ std::unique_ptr<RadioInterface> initLoRa()
     }
 #endif
     if ((!rIf) && (config.lora.region != meshtastic_Config_LoRaConfig_RegionCode_LORA_24)) {
-        rIf = std::unique_ptr<SX1268Interface>(new SX1268Interface(loraHal, SX126X_CS, SX126X_DIO1, SX126X_RESET, SX126X_BUSY));
-        if (!rIf->init()) {
+        auto sxIf =
+            std::unique_ptr<SX1268Interface>(new SX1268Interface(loraHal, SX126X_CS, SX126X_DIO1, SX126X_RESET, SX126X_BUSY));
+#ifdef SX126X_DIO3_TCXO_VOLTAGE
+        sxIf->setTCXOVoltage(SX126X_DIO3_TCXO_VOLTAGE);
+#endif
+        if (!sxIf->init()) {
             LOG_WARN("No SX1268 radio");
             rIf = nullptr;
         } else {
             LOG_INFO("SX1268 init success");
+            rIf = std::move(sxIf);
             radioType = SX1268_RADIO;
         }
     }

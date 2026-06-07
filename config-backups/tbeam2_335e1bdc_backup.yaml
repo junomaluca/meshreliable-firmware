@@ -1,0 +1,78 @@
+# start of Meshtastic configure yaml
+canned_messages: '''Are you ok?|I am ok|I am lost|I need help|I want to leave|Where
+  are you?|Meet at the meeting point|I need to drink/eat|Yes|No|OK'''
+channel_url: https://meshtastic.org/e/#CjISIEJzMGZ2WlJSZEJoZ0k4N2RpZ3JIQWMzMlNxVTl6UXJuGgZtYWx1Y2EoATABOgIIIAoTEgEBGghMb25nRmFzdCgBMAE6ABIUCAE4HEAHSAFQHlgEaAHIBgHQBgI
+config:
+  bluetooth:
+    enabled: true
+    fixedPin: 123456
+    mode: NO_PIN
+  device:
+    nodeInfoBroadcastSecs: 10800
+    tzdef: 'PST8PDT,M3.2.0/2:00:00,M11.1.0/2:00:00       '
+  display:
+    screenOnSecs: 600
+  lora:
+    channelNum: 4
+    configOkToMqtt: true
+    hopLimit: 7
+    region: 28
+    sx126xRxBoostedGain: true
+    txEnabled: true
+    txPower: 30
+    usePreset: true
+  network:
+    ntpServer: meshtastic.pool.ntp.org
+  position:
+    broadcastSmartMinimumDistance: 100
+    broadcastSmartMinimumIntervalSecs: 300
+    gpsMode: ENABLED
+    gpsUpdateInterval: 120
+    positionBroadcastSecs: 3600
+    positionBroadcastSmartEnabled: true
+    positionFlags: 811
+  power:
+    lsSecs: 300
+    minWakeSecs: 10
+    sdsSecs: 4294967295
+    waitBluetoothSecs: 60
+  security:
+    privateKey: base64:MEYSesVsHYc2WbHZpk9fQJgxSYl1Wa7mFLI0I+3+jnM=
+    publicKey: base64:6uMkqUT6UP3eOrHXZePaMR1Rzom95kdrYKqM4vFgekE=
+    serialEnabled: true
+module_config:
+  ambientLighting:
+    blue: 220
+    current: 10
+    green: 27
+    red: 94
+  cannedMessage:
+    enabled: true
+  detectionSensor:
+    detectionTriggerType: LOGIC_HIGH
+    minimumBroadcastSecs: 45
+  externalNotification:
+    alertBellBuzzer: true
+    nagTimeout: 1
+  mqtt:
+    address: home.yazdikann.com
+    enabled: true
+    encryptionEnabled: true
+    mapReportSettings:
+      publishIntervalSecs: 3600
+      shouldReportLocation: true
+    password: admin
+    proxyToClientEnabled: true
+    root: msh/US
+    username: admin
+  storeForward:
+    enabled: true
+    heartbeat: true
+    historyReturnMax: 100
+    historyReturnWindow: 72000
+    records: 100
+  telemetry:
+    deviceUpdateInterval: 2147483647
+owner: Meshtastic 1bdc
+owner_short: 1bdc
+

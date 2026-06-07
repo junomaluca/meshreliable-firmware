@@ -825,6 +825,7 @@ void setup()
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
     LOG_DEBUG("SPI.begin(SCK=%d, MISO=%d, MOSI=%d, NSS=%d)", LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
     SPI.setFrequency(4000000);
+
 #endif
 #endif
 
@@ -972,6 +973,57 @@ void setup()
     if (screen_found.port != ScanI2C::I2CPort::NO_I2C && screen)
         screen->setup();
 #endif
+#endif
+
+#ifdef LILYGO_TBEAM_BPF
+    // BPF SPI diagnostic: LORA_EN was found to be LOW despite earlyInitVariant setting it HIGH.
+    // Something between earlyInit and here (likely SPI.begin on FSPI pins) resets GPIO16.
+    // Re-assert power and test SPI.
+    {
+        LOG_INFO("BPF DIAG: BEFORE re-assert: LORA_EN(GPIO%d)=%d BPF_CTRL(GPIO%d)=%d", LORA_EN, digitalRead(LORA_EN), BPF_CTRL, digitalRead(BPF_CTRL));
+
+        // Re-assert LoRa LDO power — something reset GPIO16
+        pinMode(LORA_EN, OUTPUT);
+        digitalWrite(LORA_EN, HIGH);
+        pinMode(BPF_CTRL, OUTPUT);
+        digitalWrite(BPF_CTRL, HIGH);
+        delay(50); // LDO stabilization
+
+        LOG_INFO("BPF DIAG: AFTER re-assert: LORA_EN=%d BPF_CTRL=%d", digitalRead(LORA_EN), digitalRead(BPF_CTRL));
+
+        // Manual hardware reset of radio
+        pinMode(LORA_RESET, OUTPUT);
+        digitalWrite(LORA_RESET, LOW);
+        delay(10);
+        digitalWrite(LORA_RESET, HIGH);
+        delay(20);
+
+        // Ensure CS is GPIO-controlled
+        pinMode(LORA_CS, OUTPUT);
+        digitalWrite(LORA_CS, HIGH);
+        delay(1);
+
+        // Try raw SPI read of version register
+        SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+        digitalWrite(LORA_CS, LOW);
+        delayMicroseconds(100);
+        SPI.transfer(0x42);
+        uint8_t ver = SPI.transfer(0x00);
+        delayMicroseconds(10);
+        digitalWrite(LORA_CS, HIGH);
+        SPI.endTransaction();
+        LOG_INFO("BPF DIAG: AFTER power-on: reg0x42=0x%02X (expect 0x12)", ver);
+
+        // Read additional registers to confirm communication
+        SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+        digitalWrite(LORA_CS, LOW);
+        delayMicroseconds(100);
+        SPI.transfer(0x01);
+        uint8_t opMode = SPI.transfer(0x00);
+        digitalWrite(LORA_CS, HIGH);
+        SPI.endTransaction();
+        LOG_INFO("BPF DIAG: reg0x01(OpMode)=0x%02X(expect 0x09)", opMode);
+    }
 #endif
 
     auto rIf = initLoRa();
@@ -1149,8 +1201,13 @@ void loop()
     power->powerCommandsCheck();
 
     if (RadioLibInterface::instance != nullptr) {
+        // Poll for missed edge-triggered IRQs.  SX127x (RF95) boards where DIO0
+        // doesn't fire reliably depend entirely on this poll for TX_DONE / RX_DONE.
+        // 1000 ms was too slow — a packet at SF9/125kHz takes ~200 ms air time, so
+        // a 1 s gap causes ~50% missed RX.  100 ms keeps the miss window well
+        // under one packet time.  CPU cost is negligible (one SPI register read).
         static uint32_t lastRadioMissedIrqPoll;
-        if (!Throttle::isWithinTimespanMs(lastRadioMissedIrqPoll, 1000)) {
+        if (!Throttle::isWithinTimespanMs(lastRadioMissedIrqPoll, 100)) {
             lastRadioMissedIrqPoll = millis();
             RadioLibInterface::instance->pollMissedIrqs();
         }

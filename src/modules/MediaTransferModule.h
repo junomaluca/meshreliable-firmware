@@ -25,6 +25,7 @@ struct OutgoingTransfer {
     uint32_t startTime;          // millis() when transfer started
     uint32_t lastChunkTime;      // millis() when last chunk was sent
     bool complete;               // all chunks sent at least once
+    uint8_t completeResendCount; // how many times COMPLETE has been resent
     std::vector<uint8_t> data;   // full compressed payload
     std::vector<uint32_t> nackedChunks; // chunks that need retransmission
 };
@@ -33,12 +34,14 @@ struct OutgoingTransfer {
 struct IncomingTransfer {
     uint32_t transferId;
     uint32_t fromNodeId;
+    uint8_t channelIndex;        // channel the transfer arrived on (for proactive NACK)
     uint32_t totalChunks;
     uint32_t totalSize;
     uint32_t checksum;
     meshtastic_MediaContentType contentType;
     uint32_t startTime;          // millis() when first chunk received
     uint32_t lastChunkTime;      // millis() when last chunk received
+    uint32_t lastNackTime;       // millis() when last proactive NACK was sent
     std::vector<bool> receivedChunks; // bitmap of received chunks
     std::vector<uint8_t> data;   // reassembly buffer
     char mimeType[32];
@@ -70,6 +73,10 @@ class MediaTransferModule : private concurrency::OSThread, public ProtobufModule
     // Register a callback for completed incoming transfers
     void setTransferCompleteCallback(TransferCompleteCallback cb) { completionCallback = cb; }
 
+    // Returns true if there are active incoming or outgoing media transfers.
+    // Used by MQTT to suppress relay during media transfers to avoid TX queue congestion.
+    bool hasActiveTransfers() const { return !incoming.empty() || !outgoing.empty(); }
+
   protected:
     virtual int32_t runOnce() override;
     virtual bool handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_MediaTransfer *decoded) override;
@@ -79,6 +86,26 @@ class MediaTransferModule : private concurrency::OSThread, public ProtobufModule
     static constexpr uint32_t CHUNK_SEND_INTERVAL_MS = 2000;  // time between chunks
     static constexpr uint32_t NACK_TIMEOUT_MS = 30000;        // wait for NACK before declaring complete
     static constexpr uint32_t TRANSFER_TIMEOUT_MS = 1800000;  // 30 min max transfer time
+    static constexpr uint32_t MAX_TRANSFER_SIZE = 65536;      // 64KB max — prevents OOM on RAM-constrained devices
+    static constexpr uint32_t PROACTIVE_NACK_INTERVAL_MS = 10000; // receiver requests missing chunks every 10s
+    static constexpr uint32_t COMPLETE_RESEND_INTERVAL_MS = 10000; // sender resends COMPLETE every 10s
+    static constexpr uint8_t MAX_COMPLETE_RESENDS = 3;        // max COMPLETE resend attempts
+
+    // Deferred response — sendAckComplete/sendNack are called from runOnce() instead of
+    // handleReceivedProtobuf to avoid loopTask stack overflow. The handleReceived chain
+    // is too deep (decrypt → callModules → protobuf decode → handler → encrypt → enqueue).
+    struct PendingResponse {
+        enum Type { NONE, ACK, NACK } type = NONE;
+        uint8_t channelIndex = 0;
+        uint32_t transferId = 0;
+        uint32_t destNodeId = 0;
+        std::vector<uint32_t> missingChunks;
+        // For completion callback on ACK:
+        std::vector<uint8_t> data;
+        uint32_t totalSize = 0;
+        meshtastic_MediaContentType contentType = _meshtastic_MediaContentType_MIN;
+    };
+    PendingResponse pendingResponse;
 
     uint32_t nextTransferId = 1;
     std::vector<OutgoingTransfer> outgoing;
@@ -101,10 +128,10 @@ class MediaTransferModule : private concurrency::OSThread, public ProtobufModule
     void handleMediaAckComplete(const meshtastic_MeshPacket &mp, const meshtastic_MediaTransfer &decoded);
     void handleMediaCancel(const meshtastic_MeshPacket &mp, const meshtastic_MediaTransfer &decoded);
 
-    // Send NACK for missing chunks
-    void sendNack(uint8_t channelIndex, uint32_t transferId, const std::vector<uint32_t> &missingChunks);
+    // Send NACK for missing chunks (unicast back to sender)
+    void sendNack(uint8_t channelIndex, uint32_t transferId, uint32_t destNodeId, const std::vector<uint32_t> &missingChunks);
     // Send ACK_COMPLETE when all chunks received and verified
-    void sendAckComplete(uint8_t channelIndex, uint32_t transferId);
+    void sendAckComplete(uint8_t channelIndex, uint32_t transferId, uint32_t destNodeId);
 
     // Send a MediaTransfer protobuf on a channel to a specific node
     void sendMediaPacket(uint8_t channelIndex, uint32_t destNodeId, const meshtastic_MediaTransfer &payload);

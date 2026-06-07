@@ -53,6 +53,10 @@ void fixPriority(meshtastic_MeshPacket *p)
             } else if (p->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP ||
                        p->decoded.portnum == meshtastic_PortNum_ADMIN_APP) {
                 p->priority = meshtastic_MeshPacket_Priority_HIGH;
+                // Media transfer packets need RELIABLE priority to avoid being
+                // pushed behind MQTT-relayed text (HIGH=73) in the TX queue
+            } else if (p->decoded.portnum == meshtastic_PortNum_MEDIA_TRANSFER_APP) {
+                p->priority = meshtastic_MeshPacket_Priority_RELIABLE;
                 // if it is a response, give higher priority to let it arrive early and stop the request being relayed
             } else if (p->decoded.request_id != 0) {
                 p->priority = meshtastic_MeshPacket_Priority_RESPONSE;

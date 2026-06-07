@@ -1,0 +1,74 @@
+[17:14:31] ======================================================================
+[17:14:31] VHF T-BEAM 500+ MESSAGE STRESS TEST
+[17:14:31] Device A: !335e1be8 on /dev/cu.usbmodem101
+[17:14:31] Device B: !335e1bdc on /dev/cu.usbmodem1101 (iPhone connected via BLE)
+[17:14:31] Started: 2026-06-02T17:14:31.632821
+[17:14:31] ======================================================================
+[17:14:31] 
+Pre-flight: checking devices...
+[17:14:36]   Device A: OK
+[17:14:41]   Device B: OK
+[17:14:45] 
+============================================================
+[17:14:45] PHASE 1: DM Stress A -> B (150 messages)
+[17:14:45] ============================================================
+[17:14:45]   Sending 150 DMs A -> B...
+[17:16:47]     Progress: 25/150 (batch: 25ok/0fail) | Overall: 25 sent, 100% success
+[17:21:12]     Progress: 50/150 (batch: 50ok/0fail) | Overall: 50 sent, 100% success
+[17:27:10]     Progress: 75/150 (batch: 74ok/1fail) | Overall: 75 sent, 99% success
+[17:31:13]     Progress: 100/150 (batch: 99ok/1fail) | Overall: 100 sent, 99% success
+[17:38:22]     Progress: 125/150 (batch: 123ok/2fail) | Overall: 125 sent, 98% success
+[17:43:40]     Progress: 150/150 (batch: 148ok/2fail) | Overall: 150 sent, 99% success
+[17:43:40]   Phase 1 result: 148 ok, 2 fail
+[17:43:45] 
+============================================================
+[17:43:45] PHASE 2: DM Stress B -> A (100 messages)
+[17:43:45] ============================================================
+[17:43:45]   Sending 100 DMs B -> A...
+[17:46:09]     Progress: 25/100 (batch: 25ok/0fail) | Overall: 175 sent, 99% success
+[17:53:09]     Progress: 50/100 (batch: 47ok/3fail) | Overall: 200 sent, 98% success
+[17:55:11]     Progress: 75/100 (batch: 72ok/3fail) | Overall: 225 sent, 98% success
+[18:01:38]     Progress: 100/100 (batch: 97ok/3fail) | Overall: 250 sent, 98% success
+[18:01:38]   Phase 2 result: 97 ok, 3 fail
+[18:01:43] 
+============================================================
+[18:01:43] PHASE 3: Broadcast Stress (50 from A, 50 from B)
+[18:01:43] ============================================================
+[18:01:43]   Sending 50 broadcasts from A...
+[18:03:39]     Progress: 25/50 (batch: 25ok/0fail) | Overall: 275 sent, 98% success
+[18:05:34]     Progress: 50/50 (batch: 50ok/0fail) | Overall: 300 sent, 98% success
+[18:05:34]   Sending 50 broadcasts from B...
+[18:11:14]     Progress: 25/50 (batch: 25ok/0fail) | Overall: 325 sent, 98% success
+[18:13:40]     Progress: 50/50 (batch: 50ok/0fail) | Overall: 350 sent, 99% success
+[18:13:40]   Phase 3 result: A=50ok/0fail, B=50ok/0fail
+[18:13:45] 
+============================================================
+[18:13:45] PHASE 4: Channel Messages (25 on ch0, 25 on ch1)
+[18:13:45] ============================================================
+[18:13:45]   Sending 25 broadcasts from A ch0...
+[18:16:30]     Progress: 25/25 (batch: 25ok/0fail) | Overall: 375 sent, 99% success
+[18:16:30]   Sending 25 broadcasts from A ch1...
+[18:18:25]     Progress: 25/25 (batch: 25ok/0fail) | Overall: 400 sent, 99% success
+[18:18:25]   Phase 4 result: ch0=25ok/0fail, ch1=25ok/0fail
+[18:18:30] 
+============================================================
+[18:18:30] PHASE 5: Mixed Traffic (60 messages — DMs + broadcasts + channels)
+[18:18:30] ============================================================
+[18:18:30]   Sending 60 mixed messages (DMs, broadcasts, channel msgs)...
+[18:21:16]     Progress: 25/60 (batch: 25ok/0fail) | Overall: 425 sent, 99% success
+[18:24:03]     Progress: 50/60 (batch: 50ok/0fail) | Overall: 450 sent, 99% success
+[18:24:50]   Phase 5 result: 60 ok, 0 fail
+[18:24:55] 
+============================================================
+[18:24:55] PHASE 6: Long Messages (~220 chars, 20 messages)
+[18:24:55] ============================================================
+[18:24:55]   Sending 20 long messages (~220 chars)...
+[18:26:05]     Progress: 10/20 (10ok/0fail)
+[18:37:13]     Progress: 20/20 (11ok/9fail)
+[18:37:13]   Phase 6 result: 11 ok, 9 fail
+[18:37:18] 
+============================================================
+[18:37:18] PHASE 7: Rapid Bursts (3 bursts of 10 with 1s delay)
+[18:37:18] ============================================================
+[18:37:18]   Burst 1/3:
+[18:37:18]   Rapid burst: 10 messages with 1s delay...

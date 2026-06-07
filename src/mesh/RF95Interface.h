@@ -65,6 +65,9 @@ class RF95Interface : public RadioLibInterface
      */
     virtual void configHardwareForSend() override;
 
+    /** Periodic RX restart to prevent SX127x receiver deafness (stuck AGC / RSSI floor drift) */
+    void resetAGC() override;
+
     uint32_t getPacketTime(uint32_t pl, bool received) override { return computePacketTime(*lora, pl, received); }
 
   private:

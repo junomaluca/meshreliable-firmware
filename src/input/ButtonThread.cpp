@@ -127,6 +127,14 @@ int32_t ButtonThread::runOnce()
         waitingForLongPress = false;
     }
 
+    // After I2S mic deinit, GPIO0 is restored but OneButton has stale state
+    // from the ghost "press" caused by I2S. Reset to avoid spurious long-press events.
+    if (needsButtonReset) {
+        userButton.reset();
+        needsButtonReset = false;
+        LOG_INFO("BTN: reset OneButton after I2S deinit");
+    }
+
     userButton.tick();
     canSleep &= userButton.isIdle();
 

@@ -6,4 +6,4 @@
 #error Regenerate this file with the current version of nanopb generator.
 #endif
 
-PB_BIND(meshtastic_MediaTransfer, meshtastic_MediaTransfer, AUTO)
+PB_BIND(meshtastic_MediaTransfer, meshtastic_MediaTransfer, 2)

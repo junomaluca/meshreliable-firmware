@@ -5,6 +5,7 @@
 
 #ifdef ARCH_ESP32
 #include <codec2.h>
+#include <map>
 #include <vector>
 
 class VoiceMemoModule : private concurrency::OSThread
@@ -30,7 +31,7 @@ class VoiceMemoModule : private concurrency::OSThread
     void stopPlayback();
 
     // Called by MediaTransferModule when a VOICE_MEMO transfer completes
-    void onTransferComplete(const uint8_t *data, uint32_t size, uint32_t fromNode);
+    void onTransferComplete(const uint8_t *data, uint32_t size, uint32_t fromNode, uint32_t transferId);
 
     // Generate a synthetic test memo (440 Hz tone) and send via MediaTransfer
     // Works on devices without audio hardware for pipeline testing
@@ -41,11 +42,19 @@ class VoiceMemoModule : private concurrency::OSThread
     bool isPlaying() const { return state == State::PLAYING; }
     float getRecordingDuration() const;
 
+    // Received voice memo storage for on-device playback
+    struct ReceivedMemo {
+        std::vector<uint8_t> data;
+        uint32_t fromNode;
+        uint32_t timestamp;
+    };
+    const ReceivedMemo *getMemo(uint32_t transferId) const;
+
   protected:
     int32_t runOnce() override;
 
   private:
-    enum class State { IDLE, RECORDING, PLAYING };
+    enum class State { IDLE, RECORDING, PLAYING, FORWARDING_TO_PHONE };
     State state = State::IDLE;
 
     // Codec2
@@ -65,27 +74,77 @@ class VoiceMemoModule : private concurrency::OSThread
     // PCM scratch buffer (one frame)
     int16_t *pcmBuffer = nullptr;
 
+    // Received voice memo storage (keyed by transferId, last N kept in RAM)
+    std::map<uint32_t, ReceivedMemo> receivedMemos;
+    static constexpr int MAX_STORED_MEMOS = 5;
+
+    // Deferred transfer completion (heavy work deferred from callback to runOnce)
+    struct PendingCompletion {
+        std::vector<uint8_t> data;
+        uint32_t fromNode = 0;
+        uint32_t transferId = 0;
+        bool needsPlayback = false;
+        bool needsPhoneForward = false;
+    };
+    PendingCompletion pendingCompletion;
+
+    // Send a batch of phone-forward chunks; returns true if more remain
+    bool sendPhoneForwardBatch();
+
+  public:
+    // Streaming phone forward state (avoids blocking main thread).
+    // Public so the static forwardImageToPhone helper can queue image data.
+    struct PhoneForwardState {
+        std::vector<uint8_t> pcmData;     // decoded PCM (voice) or raw data (image)
+        uint32_t fromNode = 0;
+        uint32_t transferId = 0;
+        uint32_t totalChunks = 0;
+        uint32_t nextChunk = 0;
+        uint32_t checksum = 0;
+        bool sentStart = false;
+        bool isImage = false;             // true = image (0x04-0x06), false = voice (0x01-0x03)
+        bool active = false;
+
+        void reset() {
+            pcmData.clear();
+            pcmData.shrink_to_fit();
+            nextChunk = 0;
+            sentStart = false;
+            active = false;
+        }
+    };
+    PhoneForwardState phoneForward;
+
+  private:
+
 #ifdef HAS_VOICE_MEMO
-    enum class MicMode { I2S_STANDARD, PDM };
-    MicMode micMode = MicMode::I2S_STANDARD;
     bool micInitialized = false;
     bool spkInitialized = false;
-    bool micEnableInverted = false; // V1.1 PDM board has inverted MIC_EN
 
+#ifndef VOICE_MEMO_ES8311
+    // MVSR hardware (T3-S3 V1): separate MEMS mic + MAX98357A amp
+    enum class MicMode { I2S_STANDARD, PDM };
+    MicMode micMode = MicMode::I2S_STANDARD;
+    bool micEnableInverted = false; // V1.1 PDM board has inverted MIC_EN
     bool initMicI2S();
     bool initMicPDM();
+    void setMicEnable(bool enable);
+#endif
+
     void initMic();
     void deinitMic();
     void initSpeaker();
     void deinitSpeaker();
     bool captureAndEncodeFrame();
     bool decodeAndPlayFrame();
-    void setMicEnable(bool enable);
 #endif
 
     void initCodec2();
     void deinitCodec2();
     void encodeFrame(const int16_t *pcm);
+    void forwardToPhone(const uint8_t *codec2Data, uint32_t size, uint32_t fromNode, uint32_t transferId);
+
+  public:
     static uint32_t crc32(const uint8_t *data, uint32_t length);
 };
 

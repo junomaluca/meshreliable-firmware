@@ -87,6 +87,7 @@ class RadioInterface
 
   protected:
     bool disabled = false;
+    bool onAlternateBand = false; // true when temporarily on 2.4 GHz for multi-band retry
 
     float bw = 125;
     uint8_t sf = 9;
@@ -142,6 +143,16 @@ class RadioInterface
     virtual bool canSleep() { return true; }
 
     virtual bool wideLora() { return false; }
+
+    /**
+     * Switch between sub-GHz and 2.4 GHz bands at runtime (dual-band radios only).
+     * Returns true if the switch was successful.
+     * Default implementation returns false (single-band radios).
+     */
+    virtual bool switchBand(bool use24GHz) { return false; }
+
+    /** Returns true if currently operating on alternate (2.4 GHz) band */
+    bool isOnAlternateBand() const { return onAlternateBand; }
 
     /// Prepare hardware for sleep.  Call this _only_ for deep sleep, not needed for light sleep.
     virtual bool sleep() { return true; }

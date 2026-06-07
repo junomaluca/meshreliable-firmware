@@ -19,7 +19,7 @@
 // In addition to the default Rx flags, we need the PREAMBLE_DETECTED flag to detect whether we are actively receiving
 #define MESHTASTIC_RADIOLIB_IRQ_RX_FLAGS (RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1 << RADIOLIB_IRQ_PREAMBLE_DETECTED))
 
-#define AGC_RESET_INTERVAL_MS (60 * 1000) // 60 seconds
+#define AGC_RESET_INTERVAL_MS (15 * 1000) // 15 seconds — SX127x can go deaf after prolonged idle
 
 /**
  * We need to override the RadioLib ArduinoHal class to add mutex protection for SPI bus access

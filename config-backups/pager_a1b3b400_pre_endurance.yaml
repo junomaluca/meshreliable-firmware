@@ -1,0 +1,83 @@
+# start of Meshtastic configure yaml
+canned_messages: Are you ok?|I am ok|I am lost|I need help|I want to leave|Where are
+  you?|Meet at the meeting point|I need to drink/eat|Yes|No|OK
+channel_url: https://meshtastic.org/e/#CjISIEJzMGZ2WlJSZEJoZ0k4N2RpZ3JIQWMzMlNxVTl6UXJuGgZtYWx1Y2EoATABOgIIIAoUEgIBBRoITG9uZ0Zhc3QoATABOgASEwgBIAsoBTgBQAdIAVAeWBTIBgE
+config:
+  bluetooth:
+    enabled: true
+    mode: NO_PIN
+  device:
+    buzzerMode: DISABLED
+    nodeInfoBroadcastSecs: 3600
+    tzdef: PST8PDT,M3.2.0/2:00:00,M11.1.0/2:00:00
+  display:
+    enableMessageBubbles: true
+    screenOnSecs: 30
+  lora:
+    channelNum: 20
+    codingRate: 5
+    configOkToMqtt: true
+    hopLimit: 7
+    region: US
+    spreadFactor: 11
+    sx126xRxBoostedGain: false
+    txEnabled: true
+    txPower: 30
+    usePreset: true
+  network:
+    enabledProtocols: 1
+    wifiEnabled: true
+    wifiPsk: '3238396188'
+    wifiSsid: maluca
+  position:
+    positionBroadcastSecs: 3600
+    positionBroadcastSmartEnabled: false
+    positionFlags: 1
+  power:
+    isPowerSaving: true
+    lsSecs: 300
+    minWakeSecs: 10
+    sdsSecs: 4294967295
+    waitBluetoothSecs: 30
+  security:
+    privateKey: base64:mCx8q80xjjtsPbIQIAiMbtx61wAkUhHBqXFEuF/J7HA=
+    publicKey: base64:eYgcqRQR5SE+aQDyPedOWGK4Wt/Ezy+OWpmoKuaMcjU=
+    serialEnabled: true
+module_config:
+  ambientLighting:
+    current: 10
+    green: 180
+    red: 179
+  cannedMessage:
+    enabled: true
+    sendBell: true
+  detectionSensor:
+    detectionTriggerType: LOGIC_HIGH
+    minimumBroadcastSecs: 45
+  externalNotification:
+    alertBell: true
+    alertMessage: true
+    enabled: true
+    nagTimeout: 1
+  mqtt:
+    address: home.yazdikann.com:1883
+    enabled: true
+    encryptionEnabled: true
+    mapReportSettings:
+      publishIntervalSecs: 3600
+    mapReportingEnabled: true
+    password: admin
+    root: msh/US
+    username: admin
+  storeForward:
+    enabled: true
+    heartbeat: true
+    historyReturnMax: 100
+    historyReturnWindow: 72000
+    records: 100
+  telemetry:
+    deviceUpdateInterval: 2147483647
+owner: Meshtastic b400
+owner_short: b400
+ringtone: 24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p
+

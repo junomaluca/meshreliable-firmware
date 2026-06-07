@@ -39,6 +39,12 @@ class CrossBandModule : private concurrency::OSThread, public ProtobufModule<mes
     // Check if a bridge path exists to a node (via dual-band device or MQTT)
     bool hasBridgePath(uint32_t nodeId) const;
 
+    // Dual-band duty cycle: returns true if the next transmission should use 2.4 GHz
+    bool shouldUse24GHz() const;
+
+    // Get the sub-GHz duty cycle percentage (default 70)
+    uint32_t getDutyCycleSubGhzPercent() const;
+
   protected:
     virtual int32_t runOnce() override;
     virtual bool handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_CrossBandMessage *decoded) override;
@@ -50,6 +56,12 @@ class CrossBandModule : private concurrency::OSThread, public ProtobufModule<mes
 
     uint32_t lastAdvertTime = 0;
     uint32_t lastDedupCleanup = 0;
+
+    // Duty cycle tracking for dual-band time-division
+    static constexpr uint32_t DUTY_CYCLE_WINDOW_MS = 10000; // 10-second rolling window
+    uint32_t dutyCycleWindowStart = 0;
+    uint32_t subGhzTxCount = 0;   // transmissions on sub-GHz in current window
+    uint32_t ism24TxCount = 0;    // transmissions on 2.4 GHz in current window
 
     // Band info for all known nodes
     std::unordered_map<uint32_t, NodeBandInfo> nodeBands;
@@ -98,6 +110,10 @@ class CrossBandModule : private concurrency::OSThread, public ProtobufModule<mes
 
     // Send a cross-band packet
     void sendCrossBandPacket(const meshtastic_CrossBandMessage &payload);
+
+    // MQTT-based cross-band bridging
+    void publishBridgedMessageToMqtt(const meshtastic_CrossBandMessage &msg);
+    static const char *bandToString(meshtastic_FrequencyBand band);
 };
 
 extern CrossBandModule *crossBandModule;

@@ -11,21 +11,38 @@
 
 // ReliableRouter::ReliableRouter() {}
 
+/// Return true if current LoRa region is a 2m amateur VHF band
+static bool isVHFRegion()
+{
+    auto r = config.lora.region;
+    return r == meshtastic_Config_LoRaConfig_RegionCode_ITU1_2M ||
+           r == meshtastic_Config_LoRaConfig_RegionCode_ITU2_2M ||
+           r == meshtastic_Config_LoRaConfig_RegionCode_ITU3_2M;
+}
+
 /**
  * Get the reliable message config with sensible defaults applied.
+ * VHF amateur bands get tighter retry timing: 100% duty cycle is allowed,
+ * airtime per packet is longer at 144 MHz, and CAD is bypassed, so faster
+ * retries with shorter backoff caps improve deliverability without
+ * regulatory risk.
  */
 static meshtastic_ModuleConfig_ReliableMessageConfig getReliableConfig()
 {
     meshtastic_ModuleConfig_ReliableMessageConfig cfg = moduleConfig.reliable_message;
-    // Apply defaults if not configured
+
+    bool vhf = isVHFRegion();
+
+    // Apply defaults if not configured — VHF gets tighter timing
     if (cfg.retry_window_seconds == 0)
-        cfg.retry_window_seconds = 3600; // 1 hour
+        cfg.retry_window_seconds = 86400; // 24 hours (same for all bands)
     if (cfg.initial_retry_interval_ms == 0)
-        cfg.initial_retry_interval_ms = 15000; // 15 seconds
+        cfg.initial_retry_interval_ms = vhf ? 8000 : 15000;
     if (cfg.max_retry_interval_ms == 0)
-        cfg.max_retry_interval_ms = 300000; // 5 minutes
+        cfg.max_retry_interval_ms = vhf ? 120000 : 300000;
     if (cfg.battery_throttle_threshold == 0)
-        cfg.battery_throttle_threshold = 20; // 20%
+        cfg.battery_throttle_threshold = vhf ? 10 : 20; // VHF: licensed users, relax threshold
+
     return cfg;
 }
 

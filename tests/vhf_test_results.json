@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-06-02T15:02:32.726240",
+  "results": [
+    {
+      "test": "Region = ITU2_2M (28)",
+      "passed": true,
+      "details": "Connected to radio\nlora.use_preset: True\nlora.region: 28\nlora.hop_limit: 7\nlora.tx_enabled: True\nlora.tx_power: 30\nlora.channel_num: 4\nlora.sx126x_rx_boosted_gain: True\nlora.config_ok_to_mqtt: True\nCompleted getting preferences"
+    },
+    {
+      "test": "TX enabled",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "test": "Channel 0 = maluca on A",
+      "passed": false,
+      "details": "usage: meshtastic [-h | --version | --support] [--port [PORT] |\n                  --host [HOST] | --ble [BLE]] [--ble-scan] [--dest !xxxxxxxx]\n                  [--ch-index INDEX] [--configure CONFIGU"
+    },
+    {
+      "test": "Channel 0 = maluca on B",
+      "passed": false,
+      "details": "usage: meshtastic [-h | --version | --support] [--port [PORT] |\n                  --host [HOST] | --ble [BLE]] [--ble-scan] [--dest !xxxxxxxx]\n                  [--ch-index INDEX] [--configure CONFIGU"
+    },
+    {
+      "test": "A sees B in mesh",
+      "passed": true,
+      "details": "Found !335e1bdc"
+    },
+    {
+      "test": "B sees A in mesh",
+      "passed": true,
+      "details": "Found !335e1be8"
+    },
+    {
+      "test": "DM A->B send",
+      "passed": true,
+      "details": "Connected to radio\nSending text message Hello from A 7623 to !335e1bdc on channelIndex:0"
+    },
+    {
+      "test": "DM B->A send",
+      "passed": true,
+      "details": "Connected to radio\nSending text message Hello from B 7632 to !335e1be8 on channelIndex:0"
+    },
+    {
+      "test": "Broadcast from A",
+      "passed": true,
+      "details": "Connected to radio\nSending text message Broadcast from A 7642 to ^all on channelIndex:0"
+    },
+    {
+      "test": "Broadcast from B",
+      "passed": true,
+      "details": "Connected to radio\nSending text message Broadcast from B 7651 to ^all on channelIndex:0"
+    },
+    {
+      "test": "Position request A->B",
+      "passed": false,
+      "details": ""
+    },
+    {
+      "test": "Telemetry has voltage",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "test": "Telemetry has battery",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "test": "Long message (200 chars)",
+      "passed": false,
+      "details": "OS Error:\n  The serial device couldn't be opened, it might be in use by another process.\n  Please close any applications or webpages that may be using the device and try again.\n\nOriginal error: [Errno"
+    },
+    {
+      "test": "Burst DMs sent (3/3)",
+      "passed": true,
+      "details": "3/3 succeeded"
+    },
+    {
+      "test": "B received packet (serial)",
+      "passed": true,
+      "details": "Found 14 RX lines"
+    }
+  ],
+  "summary": {
+    "passed": 12,
+    "failed": 4,
+    "total": 16
+  }
+}

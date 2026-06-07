@@ -68,6 +68,11 @@ struct StoredMessage {
     bool isBootRelative;  // true = millis()/1000 fallback; false = epoch/RTC absolute
     AckStatus ackStatus;  // Delivery status (only meaningful for our own sent messages)
 
+    // Media metadata
+    bool isVoiceMemo = false;         // true if this message represents a voice memo
+    bool isPicture = false;           // true if this message represents a received picture
+    uint32_t voiceMemoTransferId = 0; // transfer ID for playback lookup
+
     // Text storage metadata — rebuilt from flash at boot
     uint16_t textOffset; // Offset into global text pool (valid only after loadFromFlash())
     uint16_t textLength; // Length of text in bytes
@@ -75,7 +80,7 @@ struct StoredMessage {
     // Default constructor initializes all fields safely
     StoredMessage()
         : timestamp(0), sender(0), channelIndex(0), dest(0xffffffff), type(MessageType::BROADCAST), isBootRelative(false),
-          ackStatus(AckStatus::NONE), textOffset(0), textLength(0)
+          ackStatus(AckStatus::NONE), isVoiceMemo(false), isPicture(false), voiceMemoTransferId(0), textOffset(0), textLength(0)
     {
     }
 };

@@ -66,6 +66,9 @@ void clearMessageCache();
 void scrollUp();
 void scrollDown();
 
+// Returns the transferId of the most recent voice memo in the current thread, or 0 if none
+uint32_t getLatestVoiceMemoTransferId();
+
 } // namespace MessageRenderer
 } // namespace graphics
 #endif

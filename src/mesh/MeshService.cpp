@@ -18,6 +18,7 @@
 #include "meshUtils.h"
 #include "modules/NodeInfoModule.h"
 #include "modules/PositionModule.h"
+#include "modules/PhoneBufferModule.h"
 #include "modules/RoutingModule.h"
 #include "power.h"
 #include <assert.h>
@@ -306,6 +307,40 @@ void MeshService::sendToPhone(meshtastic_MeshPacket *p)
 {
     perhapsDecode(p);
 
+    // Drop MEDIA_TRANSFER_APP broadcast packets — these are protocol control (ACK/NACK/CANCEL)
+    // echoed by RoutingModule. Forwarding them to the phone causes duplicate image entries.
+    if (p->decoded.portnum == meshtastic_PortNum_MEDIA_TRANSFER_APP && p->to == NODENUM_BROADCAST) {
+        releaseToPool(p);
+        fromNum++;
+        return;
+    }
+
+    // MeshReliable: ALWAYS buffer TEXT/PRIVATE packets for the BLE phone app,
+    // regardless of current BLE connection state. The shared toPhoneQueue is a
+    // destructive FIFO — whichever PhoneAPI consumer polls first (serial vs BLE)
+    // steals the packet. By always buffering, BLE gets its own independent copy
+    // via phoneBufferModule (PhoneAPI::available() reads buffer first for BLE),
+    // while serial/other consumers read from the toPhoneQueue.
+    bool bleConnected = false;
+#if HAS_BLUETOOTH
+    if (nimbleBluetooth && nimbleBluetooth->isConnected())
+        bleConnected = true;
+#endif
+    if (phoneBufferModule) {
+        if (p->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP ||
+            p->decoded.portnum == meshtastic_PortNum_PRIVATE_APP) {
+            phoneBufferModule->bufferPacket(p);
+            // If no API at all is active, buffer only — don't waste queue space
+            if (!bleConnected && api_state == STATE_DISCONNECTED) {
+                releaseToPool(p);
+                fromNum++;
+                return;
+            }
+            // Fall through to enqueue for serial/other consumers.
+            // BLE reads TEXT/PRIVATE from buffer; serial reads from queue.
+        }
+    }
+
 #ifdef ARCH_ESP32
 #if !MESHTASTIC_EXCLUDE_STOREFORWARD
     if (moduleConfig.store_forward.enabled && storeForwardModule->isServer() &&
@@ -319,15 +354,17 @@ void MeshService::sendToPhone(meshtastic_MeshPacket *p)
 
     if (toPhoneQueue.numFree() == 0) {
         if (p->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP ||
-            p->decoded.portnum == meshtastic_PortNum_RANGE_TEST_APP) {
-            LOG_WARN("ToPhone queue is full, discard oldest");
+            p->decoded.portnum == meshtastic_PortNum_PRIVATE_APP ||
+            p->decoded.portnum == meshtastic_PortNum_RANGE_TEST_APP ||
+            p->decoded.portnum == meshtastic_PortNum_MEDIA_TRANSFER_APP) {
+            LOG_WARN("ToPhone queue is full, discard oldest for port=%u", p->decoded.portnum);
             meshtastic_MeshPacket *d = toPhoneQueue.dequeuePtr(0);
             if (d)
                 releaseToPool(d);
         } else {
-            LOG_WARN("ToPhone queue is full, drop packet");
+            LOG_WARN("ToPhone queue is full, drop packet port=%u", p->decoded.portnum);
             releaseToPool(p);
-            fromNum++; // Make sure to notify observers in case they are reconnected so they can get the packets
+            fromNum++;
             return;
         }
     }

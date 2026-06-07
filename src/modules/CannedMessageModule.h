@@ -19,7 +19,8 @@ enum cannedMessageModuleRunState {
     CANNED_MESSAGE_RUN_STATE_DESTINATION_SELECTION,
     CANNED_MESSAGE_RUN_STATE_FREETEXT,
     CANNED_MESSAGE_RUN_STATE_MESSAGE_SELECTION,
-    CANNED_MESSAGE_RUN_STATE_EMOTE_PICKER
+    CANNED_MESSAGE_RUN_STATE_EMOTE_PICKER,
+    CANNED_MESSAGE_RUN_STATE_VOICE_RECORDING
 };
 
 enum CannedMessageModuleIconType { shift, backspace, space, enter };
@@ -177,6 +178,20 @@ class CannedMessageModule : public SinglePortModule, public Observable<const UIF
     static constexpr uint32_t filterDebounceMs = 30;
     std::vector<uint8_t> activeChannelIndices;
     std::vector<NodeEntry> filteredNodes;
+
+#ifdef HAS_VOICE_MEMO
+    bool voiceRecordingBlinkOn = false;
+    uint32_t voiceRecordingBlinkTime = 0;
+    uint32_t voiceRecordingStartTime = 0;
+    int voiceRecordingSelection = 0; // 0 = Submit, 1 = Cancel
+    bool voiceSubmitPending = false; // Deferred submit — processed in runOnce() to avoid blocking UI
+    uint32_t voiceSubmitDest = 0;
+    uint8_t voiceSubmitChannel = 0;
+    void drawVoiceRecordingScreen(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t x, int16_t y);
+    int handleVoiceRecordingInput(const InputEvent *event);
+    void voiceRecordingSubmit();
+    void voiceRecordingCancel();
+#endif
 
 #if defined(USE_VIRTUAL_KEYBOARD)
     bool shift = false;

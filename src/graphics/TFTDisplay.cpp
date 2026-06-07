@@ -1451,7 +1451,12 @@ void TFTDisplay::sendCommand(uint8_t com)
     switch (com) {
     case DISPLAYON: {
         // LOG_DEBUG("Display on");
+#ifndef ST7796_BL
+        // For devices without LovyanGFX PWM backlight, use digital pin control.
+        // Skip for ST7796_BL devices: GpioHwPin::set() calls pinMode(OUTPUT) which
+        // destroys the LovyanGFX Light_PWM configuration on the backlight pin.
         backlightEnable->set(true);
+#endif
 #if ARCH_PORTDUINO
         display(true);
         if (portduino_config.displayBacklight.pin > 0)
@@ -1478,7 +1483,9 @@ void TFTDisplay::sendCommand(uint8_t com)
     }
     case DISPLAYOFF: {
         // LOG_DEBUG("Display off");
+#ifndef ST7796_BL
         backlightEnable->set(false);
+#endif
 #if ARCH_PORTDUINO
         tft->clear();
         if (portduino_config.displayBacklight.pin > 0)
@@ -1579,7 +1586,9 @@ bool TFTDisplay::connect()
     tft = new LGFX;
 #endif
 
+#ifndef ST7796_BL
     backlightEnable->set(true);
+#endif
     LOG_INFO("Power to TFT Backlight");
 
 #ifdef UNPHONE

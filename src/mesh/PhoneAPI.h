@@ -248,6 +248,16 @@ class PhoneAPI
      */
     bool handleToRadioPacket(meshtastic_MeshPacket &p);
 
+    // Deferred message queue for rate-limited text messages.
+    // Instead of rejecting with RATE_LIMIT_EXCEEDED, queue for retry after the rate window.
+    struct DeferredMessage {
+        meshtastic_MeshPacket packet;
+        uint32_t retryAfterMs;
+    };
+    std::deque<DeferredMessage> deferredMessages;
+    static constexpr size_t kMaxDeferredMessages = 4;
+    void processDeferredMessages();
+
     /// If the mesh service tells us fromNum has changed, tell the phone
     virtual int onNotify(uint32_t newValue) override;
 };

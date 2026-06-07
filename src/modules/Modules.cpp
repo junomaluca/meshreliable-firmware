@@ -47,6 +47,8 @@
 #include "modules/CrossBandModule.h"
 #ifdef ARCH_ESP32
 #include "modules/esp32/VoiceMemoModule.h"
+#include "modules/PhoneBufferModule.h"
+#include "modules/PhoneVoiceUploadModule.h"
 #endif
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
 #include "modules/TraceRouteModule.h"
@@ -161,7 +163,12 @@ void setupModules()
 #ifdef ARCH_ESP32
     // Voice memo — on-device Codec2 recording/playback via MediaTransferModule
     voiceMemoModule = new VoiceMemoModule();
+    // Phone voice upload — receives raw PCM from phone via BLE, Codec2 encodes, relays via MediaTransfer
+    phoneVoiceUploadModule = new PhoneVoiceUploadModule();
 #endif
+    // Phone buffer — stores packets received while phone is disconnected, replays on reconnect.
+    // 500 entries: handles text (~1 pkt each), images (~25 chunks), voice memos (~400 PCM chunks for 5s).
+    phoneBufferModule = new PhoneBufferModule(500);
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
     traceRouteModule = new TraceRouteModule();
 #endif

@@ -59,6 +59,28 @@ int16_t RadioLibRF95::setFrequency(float freq)
 {
     // RADIOLIB_CHECK_RANGE(freq, 862.0, 1020.0, ERR_INVALID_FREQUENCY);
 
+    // SX1276 has separate LF (137-525 MHz) and HF (862-1020 MHz) RF front-ends.
+    // RegOpMode bit 3 (LowFrequencyModeOn) selects which one is active.
+    // RadioLib's setActiveModem() clears this bit when switching to LoRa mode,
+    // so we must explicitly set it for LF operation. This bit can only be
+    // modified in SLEEP mode.
+    Module *mod = this->getMod();
+    bool needLF = (freq < 525.0f);
+    uint8_t opMode = mod->SPIreadRegister(RADIOLIB_SX127X_REG_OP_MODE);
+    bool currentlyLF = (opMode & 0x08) != 0;
+
+    if (needLF != currentlyLF) {
+        // Enter SLEEP to modify bit 3
+        mod->SPIsetRegValue(RADIOLIB_SX127X_REG_OP_MODE, RADIOLIB_SX127X_SLEEP, 2, 0);
+        if (needLF) {
+            mod->SPIsetRegValue(RADIOLIB_SX127X_REG_OP_MODE, 0x08, 3, 3);
+        } else {
+            mod->SPIsetRegValue(RADIOLIB_SX127X_REG_OP_MODE, 0x00, 3, 3);
+        }
+        // Return to STANDBY
+        mod->SPIsetRegValue(RADIOLIB_SX127X_REG_OP_MODE, RADIOLIB_SX127X_STANDBY, 2, 0);
+    }
+
     // set frequency
     return (SX127x::setFrequencyRaw(freq));
 }
