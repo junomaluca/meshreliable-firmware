@@ -95,6 +95,15 @@ SerialConsole::SerialConsole() : StreamAPI(&Port), RedirectablePrint(&Port), con
         }
     }
 #endif
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) ||                                                   \
+    defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    // Make USB-CDC (HWCDC) writes NON-BLOCKING. Under heavy serial output — e.g. the
+    // media-transfer module forwarding START/CHUNK/COMPLETE packets — a blocking write
+    // can stall the loop task long enough to trip the task watchdog, which resets the
+    // chip and tears down the USB connection (host sees "Device not configured" and the
+    // device re-enumerates). Dropping a few console bytes is far better than a reset.
+    Port.setTxTimeoutMs(0);
+#endif
 #if !ARCH_PORTDUINO
     emitRebooted();
 #endif
