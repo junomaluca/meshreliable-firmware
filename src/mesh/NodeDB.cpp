@@ -1592,29 +1592,41 @@ void NodeDB::installDefaultDeviceState()
  */
 void NodeDB::pickNewNodeNum()
 {
-    NodeNum nodeNum = myNodeInfo.my_node_num;
     getMacAddr(ourMacAddr); // Make sure ourMacAddr is set
-    if (nodeNum == 0) {
-        // Pick an initial nodenum based on the macaddr
-        nodeNum = (ourMacAddr[2] << 24) | (ourMacAddr[3] << 16) | (ourMacAddr[4] << 8) | ourMacAddr[5];
-    }
+    // Our MAC-derived number is this hardware's stable, permanent identity.
+    NodeNum macNum = (ourMacAddr[2] << 24) | (ourMacAddr[3] << 16) | (ourMacAddr[4] << 8) | ourMacAddr[5];
 
-    // Identity check via public key (or "empty slot?" when no keys yet);
-    // macaddr no longer lives on the slim header.
+    NodeNum nodeNum = myNodeInfo.my_node_num ? myNodeInfo.my_node_num : macNum;
+
+    // MeshReliable node-churn fix: recognise our OWN NodeDB entry by the stable
+    // MAC-derived number, not only by public key. The security keys regenerate on
+    // every boot when the security config fails to persist (the BPF/tbeam NVS issue),
+    // so the old key-only check treated our own stale entry as "another node" and
+    // re-randomised our node number every boot — a reboot/renumber churn loop that
+    // polluted the mesh with dozens of phantom self-entries, broke DM addressing, and
+    // dropped the device off USB every few seconds. Anchoring identity to the MAC
+    // converges on one stable number.
     auto isOurOwnEntry = [&](const meshtastic_NodeInfoLite *n) -> bool {
         if (!n)
             return false;
+        if (n->num == macNum)
+            return true; // our hardware identity — always ours
         if (owner.public_key.size == 32 && n->public_key.size == 32)
             return memcmp(n->public_key.bytes, owner.public_key.bytes, 32) == 0;
         return !nodeInfoLiteHasUser(n);
     };
 
     meshtastic_NodeInfoLite *found;
-    while (((found = getMeshNode(nodeNum)) && !isOurOwnEntry(found)) ||
-           (nodeNum == NODENUM_BROADCAST || nodeNum < NUM_RESERVED)) {
-        NodeNum candidate = random(NUM_RESERVED, LONG_MAX); // try a new random choice
-        if (found)
-            LOG_WARN("NOTE! Our desired nodenum 0x%x is invalid or in use, picking 0x%x", nodeNum, candidate);
+    int guard = 0;
+    while ((((found = getMeshNode(nodeNum)) && !isOurOwnEntry(found)) ||
+            (nodeNum == NODENUM_BROADCAST || nodeNum < NUM_RESERVED)) &&
+           ++guard <= 8) {
+        // Prefer our stable MAC-derived number; only fall back to a random choice if
+        // that number itself is taken by a genuinely different node.
+        NodeNum candidate = (nodeNum != macNum && getMeshNode(macNum) == nullptr)
+                                ? macNum
+                                : random(NUM_RESERVED, LONG_MAX);
+        LOG_WARN("Nodenum 0x%x unusable/in use, trying 0x%x", nodeNum, candidate);
         nodeNum = candidate;
     }
     LOG_DEBUG("Use nodenum 0x%x ", nodeNum);
@@ -1831,11 +1843,19 @@ void NodeDB::loadFromDisk()
     config.lora.region = USERPREFS_CONFIG_LORA_REGION;
 #endif
 
-    // Ham-only devices (e.g. T-Beam BPF) must always be in licensed mode
-    // to satisfy the licensedOnly check in validateConfigRegion()
-#ifdef HAS_HAM_2M_ONLY
-    owner.is_licensed = true;
-#endif
+    // Force licensed/HAM operator mode off for all devices, in every case.
+    // Licensed mode is never used on our private encrypted network. Clear it on
+    // both the live owner struct AND our own NodeDB entry's bitfield, otherwise a
+    // stale licensed bit there is restored into owner (above) and re-broadcast,
+    // making the app show "Licensed Operator" stuck on with no way to disable it.
+    owner.is_licensed = false;
+    {
+        meshtastic_NodeInfoLite *self = getMeshNode(getNodeNum());
+        if (self && nodeInfoLiteIsLicensed(self)) {
+            nodeInfoLiteSetBit(self, NODEINFO_BITFIELD_IS_LICENSED_MASK, false);
+            saveToDisk(SEGMENT_DEVICESTATE | SEGMENT_NODEDATABASE);
+        }
+    }
 #ifdef USERPREFS_LORACONFIG_CHANNEL_NUM
     config.lora.channel_num = USERPREFS_LORACONFIG_CHANNEL_NUM;
 #endif

@@ -638,13 +638,15 @@ void AdminModule::handleSetOwner(const meshtastic_User &o)
     }
     snprintf(owner.id, sizeof(owner.id), "!%08x", nodeDB->getNodeNum());
 
-    if (owner.is_licensed != o.is_licensed) {
+    // MeshReliable: licensed/HAM operator mode is never used on our private
+    // encrypted network. Always keep it disabled regardless of what the client
+    // requests, so the app's "Licensed Operator" toggle can be turned off (and
+    // can never be turned back on / strip channel encryption).
+    if (owner.is_licensed) {
         changed = 1;
-        owner.is_licensed = o.is_licensed;
-        if (channels.ensureLicensedOperation()) {
-            sendWarning(licensedModeMessage);
-        }
+        owner.is_licensed = false;
     }
+    (void)o.is_licensed;
     if (owner.has_is_unmessagable != o.has_is_unmessagable ||
         (o.has_is_unmessagable && owner.is_unmessagable != o.is_unmessagable)) {
         changed = 1;
@@ -1467,6 +1469,13 @@ void AdminModule::handleStoreDeviceUIConfig(const meshtastic_DeviceUIConfig &uic
 
 void AdminModule::handleSetHamMode(const meshtastic_HamParameters &p)
 {
+    // MeshReliable: HAM / licensed operator mode is disabled in every case on our
+    // private encrypted network. Ignore ham-mode requests entirely so licensed
+    // mode can never be re-enabled and channel encryption is never stripped.
+    (void)p;
+    LOG_INFO("Ignoring SetHamMode: licensed/HAM mode is permanently disabled on MeshReliable");
+    return;
+
     // Validate ham parameters before setting since this would bypass validation in the owner struct
     const char *fieldsToCheck[] = {p.call_sign, p.short_name};
     const char *fieldNames[] = {"call_sign", "short_name"};
