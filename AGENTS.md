@@ -8,6 +8,26 @@ This repository is the [Meshtastic](https://meshtastic.org) firmware — a C++17
 
 This file (`AGENTS.md`) is a short pointer + quick reference for agents that don't read `.github/copilot-instructions.md` by default.
 
+## ⚠️ CRITICAL INVARIANTS — DO NOT REGRESS
+
+**Before editing device-identity, retry/reliability, licensed-mode, or USB-CDC code,
+read [`docs/RELIABILITY_INVARIANTS.md`](docs/RELIABILITY_INVARIANTS.md).** These are
+hard-won fixes that a "cleanup" can silently revert and reintroduce real, observed
+failures. Short list (full rationale + exact files in that doc):
+
+1. **Node identity is MAC-anchored** (`NodeDB::pickNewNodeNum`) — never revert to
+   public-key-only self-recognition (causes a node-number churn/reboot loop).
+2. **Licensed/HAM mode forced OFF** (`NodeDB.cpp`, `AdminModule.cpp`) — keeps channel
+   encryption; do not re-enable.
+3. **DM persistent retry: 24 h window**, max interval 60 s/90 s (`ReliableRouter.cpp`).
+4. **Group messages: per-member ACK + 24 h retry tail** (`GroupMessageModule.*`) — NOT
+   a fire-and-forget channel broadcast; don't shorten to 5 tries/10 min.
+5. **Media retry ~1 h** (`MediaTransferModule.h`) — don't revert to 3 tries/30 s.
+6. **USB-CDC non-blocking** `setTxTimeoutMs(0)` (`SerialConsole.cpp`) — prevents
+   media-load watchdog resets.
+7. **Test harness** (`tests/full_7device_test.py`): identity-based discovery (never
+   hardcoded ports), guarded reconnect, DM-A retry reconciliation — see the doc.
+
 ## Quick command reference
 
 | Action                           | Command                                                                                                       |
