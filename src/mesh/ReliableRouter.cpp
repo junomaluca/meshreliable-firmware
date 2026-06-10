@@ -39,7 +39,7 @@ static meshtastic_ModuleConfig_ReliableMessageConfig getReliableConfig()
     if (cfg.initial_retry_interval_ms == 0)
         cfg.initial_retry_interval_ms = vhf ? 8000 : 15000;
     if (cfg.max_retry_interval_ms == 0)
-        cfg.max_retry_interval_ms = vhf ? 120000 : 300000;
+        cfg.max_retry_interval_ms = vhf ? 60000 : 90000; // DM-B: tighter cadence so late retries land in ~1-1.5min, not 2-5min
     if (cfg.battery_throttle_threshold == 0)
         cfg.battery_throttle_threshold = vhf ? 10 : 20; // VHF: licensed users, relax threshold
 

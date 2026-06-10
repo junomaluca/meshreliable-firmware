@@ -85,11 +85,14 @@ class MediaTransferModule : private concurrency::OSThread, public ProtobufModule
     static constexpr uint8_t MAX_CONCURRENT_TRANSFERS = 4;
     static constexpr uint32_t CHUNK_SEND_INTERVAL_MS = 2000;  // time between chunks
     static constexpr uint32_t NACK_TIMEOUT_MS = 30000;        // wait for NACK before declaring complete
-    static constexpr uint32_t TRANSFER_TIMEOUT_MS = 1800000;  // 30 min max transfer time
+    // DM-C: long media retry window so voice/image approach ~100%. The sender keeps
+    // resending COMPLETE (and the receiver keeps proactively NACKing missing chunks)
+    // for up to ~1h instead of giving up after 3 tries (~30s).
+    static constexpr uint32_t TRANSFER_TIMEOUT_MS = 3600000;  // 1 hour max transfer time
     static constexpr uint32_t MAX_TRANSFER_SIZE = 65536;      // 64KB max — prevents OOM on RAM-constrained devices
     static constexpr uint32_t PROACTIVE_NACK_INTERVAL_MS = 10000; // receiver requests missing chunks every 10s
-    static constexpr uint32_t COMPLETE_RESEND_INTERVAL_MS = 10000; // sender resends COMPLETE every 10s
-    static constexpr uint8_t MAX_COMPLETE_RESENDS = 3;        // max COMPLETE resend attempts
+    static constexpr uint32_t COMPLETE_RESEND_INTERVAL_MS = 30000; // sender resends COMPLETE every 30s
+    static constexpr uint8_t MAX_COMPLETE_RESENDS = 120;     // 120 x 30s = ~1h of COMPLETE/recovery retries
 
     // Deferred response — sendAckComplete/sendNack are called from runOnce() instead of
     // handleReceivedProtobuf to avoid loopTask stack overflow. The handleReceived chain

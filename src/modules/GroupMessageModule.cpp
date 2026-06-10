@@ -59,11 +59,18 @@ int32_t GroupMessageModule::runOnce()
             continue;
         }
 
-        // Check if it's time to rebroadcast (battery-throttled)
+        // Check if it's time to rebroadcast (battery-throttled). GRP-A: keep retrying
+        // un-ACKed members until TRACKING_TIMEOUT; after the explicit schedule, repeat
+        // the last (long) interval. Jitter avoids synchronized collisions across nodes.
         uint32_t battMult = getBatteryRetryMultiplier();
-        if (tracker.rebroadcastCount < MAX_REBROADCASTS && battMult > 0) {
-            uint32_t interval = REBROADCAST_INTERVALS[tracker.rebroadcastCount] * battMult;
-            if (now - tracker.lastRebroadcast >= interval) {
+        if (battMult > 0) {
+            uint8_t idx = tracker.rebroadcastCount < NUM_REBROADCAST_INTERVALS
+                              ? tracker.rebroadcastCount
+                              : (uint8_t)(NUM_REBROADCAST_INTERVALS - 1);
+            uint32_t interval = REBROADCAST_INTERVALS[idx] * battMult;
+            int32_t jitter = (int32_t)random(interval / 4) - (int32_t)(interval / 8); // +/-12.5%
+            uint32_t effInterval = (uint32_t)((int32_t)interval + jitter);
+            if (now - tracker.lastRebroadcast >= effInterval) {
                 rebroadcastMessage(tracker);
             }
         }

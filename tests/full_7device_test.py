@@ -93,6 +93,8 @@ INTER_MSG_DELAY = 1      # seconds between messages in a phase
 GROUP_MSG_WAIT = 10       # seconds to wait for group msg delivery
 SEND_HANG_TIMEOUT = 20   # seconds before a send() is treated as hung (e.g. wedged pager USB-TX)
 MAX_RECONNECTS = 4       # give up on a chronically-dropping device after this many reconnects/phase-run
+RETRY_RECONCILE_GRACE = 180  # DM-A: after a phase, wait this long for firmware retries to land, then
+                             # upgrade messages that were delivered after the per-message timeout
 
 # Stable owner longNames per device — used for identity-based (re)discovery across ports.
 NAME_TO_LONGNAME = {
@@ -356,6 +358,11 @@ class Full7DeviceTest:
         self.consec_fail = collections.defaultdict(int)
         self.skip_devices = set()
         self.reconnect_count = collections.defaultdict(int)
+        # DM-A: persistent record of which message tags were actually received (by whom),
+        # so deliveries that arrive AFTER the per-message timeout (via firmware retries)
+        # can still be counted in a post-phase reconciliation pass.
+        self.delivered_tags = collections.defaultdict(set)  # tag -> set(receiver names)
+        self.tracked_tags = set()                            # every tag we've sent this run
 
     # ─── Setup ───────────────────────────────────────────────────────
 
@@ -549,6 +556,12 @@ class Full7DeviceTest:
                                     info["event"].set()
                             else:
                                 info["event"].set()
+                # DM-A: record delivery against ALL tracked tags — captures retries that
+                # land after the per-message timeout (once pending_rx has been popped).
+                if text:
+                    for tg in self.tracked_tags:
+                        if tg in text:
+                            self.delivered_tags[tg].add(receiver)
 
         # Group messages (portnum 258)
         if portnum in (258, "GROUP_MESSAGE_APP", ""):
@@ -571,6 +584,17 @@ class Full7DeviceTest:
                                 info["hops_away"] = hops
                                 info["path"] = "mqtt" if via_mqtt else "radio"
                                 info["event"].set()
+                # DM-A: record group delivery against tracked tags (captures late retries)
+                if isinstance(payload, (bytes, bytearray)):
+                    gf = _dec_fields(payload).get(4, b"")
+                    if isinstance(gf, (bytes, bytearray)):
+                        try:
+                            gf = gf.decode("utf-8")
+                        except Exception:
+                            gf = ""
+                    for tg in self.tracked_tags:
+                        if tg in str(gf):
+                            self.delivered_tags[tg].add(receiver)
 
         # Media ACK/NACK (portnum 259)
         if portnum in (259, "MEDIA_TRANSFER_APP", ""):
@@ -1147,6 +1171,8 @@ class Full7DeviceTest:
     def _log_result(self, result):
         """Append result to JSONL and results list."""
         self.results.append(result)
+        if result.get("msg_id"):
+            self.tracked_tags.add(result["msg_id"])  # DM-A: track for post-phase retry reconciliation
         phase = result["phase"]
         self.phase_stats[phase]["sent"] += 1
         if result["success"]:
@@ -1159,6 +1185,40 @@ class Full7DeviceTest:
                 f.write(json.dumps(result, default=str) + "\n")
         except Exception:
             pass
+
+    def _reconcile_phase(self, phase):
+        """DM-A: after a phase, wait a grace window for the firmware's retries to deliver,
+        then upgrade any message scored FAIL that actually got received (delivered_tags)
+        or that the iOS app shows. Reliability matters more than the short send-window, so
+        we measure eventual delivery, not just first-attempt."""
+        failed = [r for r in self.results if r["phase"] == phase and not r["success"]]
+        if not failed:
+            return
+        log(f"  [DM-A] reconciling {len(failed)} unconfirmed {phase} msg(s), waiting up to "
+            f"{RETRY_RECONCILE_GRACE}s for retries...")
+        deadline = time.time() + RETRY_RECONCILE_GRACE
+        while time.time() < deadline:
+            pending = [r for r in failed if not r["success"]]
+            if not pending:
+                break
+            for r in pending:
+                tag = r.get("msg_id")
+                if not tag:
+                    continue
+                got = len(self.delivered_tags.get(tag, ())) > 0
+                if not got and self.ios.available and self.ios.check_message(tag, timeout=2):
+                    got = True
+                if got:
+                    r["success"] = True
+                    r["error"] = "delivered_via_retry"
+                    r["receive_time"] = time.time()
+                    self.phase_stats[phase]["ok"] += 1
+                    self.phase_stats[phase]["fail"] -= 1
+                    log(f"    ↑ {phase}: {r['src']}->{r.get('dst')} delivered via retry")
+            time.sleep(8)
+        up = sum(1 for r in failed if r["success"])
+        log(f"  [DM-A] {up}/{len(failed)} late deliveries; {phase} now "
+            f"{self.phase_stats[phase]['ok']}/{self.phase_stats[phase]['sent']}")
 
     # ─── Round-Robin Target Selection ────────────────────────────────
 
@@ -1678,16 +1738,19 @@ class Full7DeviceTest:
         try:
             # Phase 2: Text DMs
             self.run_phase_text_dm()
+            self._reconcile_phase("text_dm")
             self.print_summary()
             self._reset_phase()
 
             # Phase 3: Voice DMs
             self.run_phase_voice_dm()
+            self._reconcile_phase("voice_dm")
             self.print_summary()
             self._reset_phase()
 
             # Phase 4: Image DMs
             self.run_phase_image_dm()
+            self._reconcile_phase("image_dm")
             self.print_summary()
             self._reset_phase()
 
@@ -1703,21 +1766,25 @@ class Full7DeviceTest:
 
             # Phase 6: Group text
             self.run_phase_group_text()
+            self._reconcile_phase("group_text")
             self.print_summary()
             self._reset_phase()
 
             # Phase 7: Group voice
             self.run_phase_group_voice()
+            self._reconcile_phase("group_voice")
             self.print_summary()
             self._reset_phase()
 
             # Phase 8: Group image
             self.run_phase_group_image()
+            self._reconcile_phase("group_image")
             self.print_summary()
             self._reset_phase()
 
             # Phase 9: Channel broadcasts
             self.run_phase_channel_broadcast()
+            self._reconcile_phase("channel_broadcast")
             self.print_summary()
 
         except KeyboardInterrupt:

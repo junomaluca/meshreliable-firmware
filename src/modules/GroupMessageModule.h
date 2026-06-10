@@ -40,12 +40,15 @@ class GroupMessageModule : private concurrency::OSThread, public ProtobufModule<
     // Maximum concurrent tracked messages
     static constexpr uint8_t MAX_TRACKED_MESSAGES = 8;
 
-    // Rebroadcast schedule: intervals in ms (decaying)
-    static constexpr uint32_t REBROADCAST_INTERVALS[] = {15000, 30000, 60000, 120000, 300000};
-    static constexpr uint8_t MAX_REBROADCASTS = 5;
+    // GRP-A: rebroadcast schedule — front-loaded, then a long tail; the LAST interval
+    // repeats (hourly) until TRACKING_TIMEOUT, so un-ACKed members keep being retried
+    // for up to ~24h. Only un-ACKed members are resent, so airtime stays low.
+    static constexpr uint32_t REBROADCAST_INTERVALS[] = {15000,  30000,   60000,   120000,
+                                                         300000, 600000,  1800000, 3600000};
+    static constexpr uint8_t NUM_REBROADCAST_INTERVALS = 8;
 
-    // How long to keep tracking a message before giving up (10 minutes)
-    static constexpr uint32_t TRACKING_TIMEOUT_MS = 600000;
+    // How long to keep tracking/retrying a message before giving up (24 hours).
+    static constexpr uint32_t TRACKING_TIMEOUT_MS = 86400000UL;
 
     // Next message ID counter
     uint32_t nextMessageId = 1;
