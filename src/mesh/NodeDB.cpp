@@ -577,10 +577,11 @@ NodeDB::NodeDB()
     moduleConfig.neighbor_info.update_interval =
         Default::getConfiguredOrMinimumValue(moduleConfig.neighbor_info.update_interval, min_neighbor_info_broadcast_secs);
 
-    // Don't let licensed users to rebroadcast encrypted packets
-    if (owner.is_licensed) {
-        config.device.rebroadcast_mode = meshtastic_Config_DeviceConfig_RebroadcastMode_LOCAL_ONLY;
-    }
+    // MeshReliable: licensed users CAN relay encrypted traffic on our private network.
+    // The VHF selective downlink in MQTT.cpp rate-limits automatic broadcasts to prevent
+    // flooding, while DMs and user content always relay. This replaces the blanket
+    // LOCAL_ONLY restriction that prevented cross-band MQTT relay entirely.
+    // (Stock Meshtastic forces LOCAL_ONLY for licensed users here.)
 
 #if !HAS_TFT
     if (config.display.displaymode == meshtastic_Config_DisplayConfig_DisplayMode_COLOR) {

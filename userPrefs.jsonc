@@ -61,7 +61,7 @@
   "USERPREFS_EXT_NOTIF_ALERT_BELL": "true",
 
   // ----- Canned Messages -----
-  "USERPREFS_CANNED_MESSAGES": "'Are you ok?|I am ok|I am lost|I need help|I want to leave|Where are you?|Meet at the meeting point|I need to drink/eat|Yes|No|OK'",
+  "USERPREFS_CANNED_MESSAGES": "Are you ok?|I am ok|I am lost|I need help|I want to leave|Where are you?|Meet at the meeting point|I need to drink/eat|Yes|No|OK",
 
   // ----- Media Transfer -----
   "USERPREFS_MEDIA_TRANSFER_ENABLED": "true",

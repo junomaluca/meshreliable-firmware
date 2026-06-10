@@ -151,60 +151,73 @@ inline void onReceiveProto(char *topic, byte *payload, size_t length)
         }
     }
 
-    // Selective MQTT downlink for VHF (ITU2_2M) devices:
-    // Without filtering, MQTT downlink floods the LoRa TX queue with cross-band traffic
-    // (position, telemetry, broadcasts from 915 MHz devices), making the radio deaf.
-    // We suppress LoRa rebroadcast only for:
-    //   - High-volume broadcasts (position, telemetry, nodeinfo from 915 MHz)
-    //   - DMs to nodes confirmed MQTT-only (viaMqtt=true AND never heard on LoRa)
-    // We allow LoRa rebroadcast for:
-    //   1. DMs addressed to this device (cross-band delivery via isToUs check above)
-    //   2. DMs to unknown nodes (not in nodeDB — might be on our band, DMs are rare)
-    //   3. DMs to nodes heard via LoRa (snr != 0, even if viaMqtt is stale)
-    //   4. DMs to nodes not marked viaMqtt
-    //   5. Text broadcast messages (user-initiated, rare — decrypt to peek at portnum)
+    // VHF MQTT relay policy for ITU2_2M devices:
+    // MQTT downlink can flood the VHF TX queue with cross-band broadcasts (position,
+    // telemetry, nodeinfo from dozens of sub-GHz devices). To prevent flooding while
+    // maintaining reliable cross-band messaging:
+    //   - DMs: ALWAYS relay on radio. DMs are user-initiated and rare — no flooding risk.
+    //   - Broadcasts: User-initiated content (text, images, voice, group msgs) always
+    //     relayed. Only automatic high-volume portnums (position, telemetry, nodeinfo)
+    //     are rate-limited via token bucket. Encrypted broadcasts that can't be decoded
+    //     are relayed (permissive default — better to relay than drop user content).
+    //   - PKI: ALWAYS relay (handled separately below).
     if (config.lora.region == meshtastic_Config_LoRaConfig_RegionCode_ITU2_2M && !isToUs(p.get())) {
-        bool relayForPeer = false;
-        if (p->to != NODENUM_BROADCAST) {
-            const meshtastic_NodeInfoLite *destNode = nodeDB->getMeshNode(p->to);
-            // Relay DMs unless destination is confirmed MQTT-only.
-            // Unknown nodes (!destNode): relay — they might be on our band and DMs are rare.
-            // viaMqtt can be stale (a node's LoRa packet echoed back through MQTT flips the
-            // bit to true), so also check SNR: only set from radio-received packets (MQTT
-            // packets have rx_snr=0 and don't overwrite it), so snr != 0 means LoRa-reachable.
-            if (!destNode) {
-                relayForPeer = true;
-                LOG_INFO("MQTT selective downlink: relaying for unknown node 0x%08x", p->to);
-            } else if (!nodeInfoLiteViaMqtt(destNode) || destNode->snr != 0) {
-                relayForPeer = true;
-                LOG_INFO("MQTT selective downlink: relaying for LoRa peer 0x%08x (viaMqtt=%d snr=%.1f)", p->to,
-                         nodeInfoLiteViaMqtt(destNode), destNode->snr);
+        if (p->to == NODENUM_BROADCAST) {
+            bool isAutomatic = false;
+            // Check if this is a known automatic/high-volume portnum.
+            // Already-decoded packets (mqtt.encryption_enabled=false) can be inspected directly.
+            // Encrypted packets: attempt decode. If decode fails (key mismatch), default to
+            // relay (permissive) — better to relay an unknown packet than drop user content.
+            if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
+                auto pn = p->decoded.portnum;
+                isAutomatic = (pn == meshtastic_PortNum_POSITION_APP ||
+                               pn == meshtastic_PortNum_TELEMETRY_APP ||
+                               pn == meshtastic_PortNum_NODEINFO_APP ||
+                               pn == meshtastic_PortNum_NEIGHBORINFO_APP);
+            } else if (perhapsDecode(p.get()) == DecodeState::DECODE_SUCCESS) {
+                auto pn = p->decoded.portnum;
+                isAutomatic = (pn == meshtastic_PortNum_POSITION_APP ||
+                               pn == meshtastic_PortNum_TELEMETRY_APP ||
+                               pn == meshtastic_PortNum_NODEINFO_APP ||
+                               pn == meshtastic_PortNum_NEIGHBORINFO_APP);
+            }
+            // else: decode failed → not automatic → relay (permissive default)
+
+            if (isAutomatic) {
+                // Rate-limit automatic broadcasts (3 burst, 1 per 30s refill)
+                static uint32_t lastMqttAutoMs = 0;
+                static uint8_t mqttAutoTokens = 3;
+                const uint32_t REFILL_MS = 30000;
+                const uint8_t MAX_TOKENS = 3;
+
+                uint32_t now = millis();
+                uint32_t elapsed = now - lastMqttAutoMs;
+                uint8_t refill = min(elapsed / REFILL_MS, (uint32_t)MAX_TOKENS);
+                if (refill > 0) {
+                    uint16_t newTokens = (uint16_t)mqttAutoTokens + refill;
+                    mqttAutoTokens = (newTokens > MAX_TOKENS) ? MAX_TOKENS : (uint8_t)newTokens;
+                    lastMqttAutoMs = now;
+                }
+
+                if (mqttAutoTokens > 0) {
+                    mqttAutoTokens--;
+                    LOG_DEBUG("MQTT VHF relay: auto broadcast from 0x%08x (tokens: %d)", p->from, mqttAutoTokens);
+                } else {
+                    LOG_DEBUG("MQTT VHF relay: rate-limited auto broadcast from 0x%08x", p->from);
+                    p->hop_limit = 0;
+                }
+            } else {
+                LOG_INFO("MQTT VHF relay: user broadcast from 0x%08x", p->from);
             }
         } else {
-            // Broadcast: decrypt to peek at portnum. Text messages are user-initiated and
-            // rare, so they're worth relaying cross-band. Position/telemetry/nodeinfo are
-            // automatic and high-volume — suppress those to avoid flooding the VHF band.
-            // perhapsDecode is safe to call early (returns immediately if already decoded).
-            if (perhapsDecode(p.get()) == DecodeState::DECODE_SUCCESS &&
-                p->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP) {
-                relayForPeer = true;
-                LOG_INFO("MQTT selective downlink: relaying text broadcast from 0x%08x", p->from);
-            }
-        }
-        if (!relayForPeer) {
-            LOG_DEBUG("MQTT selective downlink: local-only for packet to 0x%08x", p->to);
-            p->hop_limit = 0;
+            LOG_INFO("MQTT VHF relay: DM to 0x%08x from 0x%08x", p->to, p->from);
         }
     }
 
-    // PKI messages get accepted even if we can't decrypt
+    // PKI messages: always enqueue. PKI DMs are user-initiated and rare.
+    // Previous viaMqtt/SNR filtering was fragile in cross-band MQTT relay scenarios.
     if (router && p->which_payload_variant == meshtastic_MeshPacket_encrypted_tag && strcmp(e.channel_id, "PKI") == 0) {
-        const meshtastic_NodeInfoLite *tx = nodeDB->getMeshNode(getFrom(p.get()));
-        const meshtastic_NodeInfoLite *rx = nodeDB->getMeshNode(p->to);
-        // Only accept PKI messages to us, or if we have both the sender and receiver in our nodeDB, as then it's
-        // likely they discovered each other via a channel we have downlink enabled for
-        if (isToUs(p.get()) || (nodeInfoLiteHasUser(tx) && nodeInfoLiteHasUser(rx)))
-            router->enqueueReceivedMessage(p.release());
+        router->enqueueReceivedMessage(p.release());
     } else if (router &&
                perhapsDecode(p.get()) == DecodeState::DECODE_SUCCESS) // ignore messages if we don't have the channel key
         router->enqueueReceivedMessage(p.release());
@@ -856,13 +869,11 @@ void MQTT::onSend(const meshtastic_MeshPacket &mp_encrypted, const meshtastic_Me
             return;
         }
 
-        // Don't publish MEDIA_TRANSFER_APP protocol packets to MQTT. These are chunked binary transfer
-        // control messages (START/CHUNK/COMPLETE/NACK/ACK) that cause duplicate image entries when the
-        // phone receives them back from MQTT in addition to the direct BLE/serial path.
-        if (mp_decoded.decoded.portnum == meshtastic_PortNum_MEDIA_TRANSFER_APP) {
-            LOG_DEBUG("MQTT onSend - Skipping MEDIA_TRANSFER_APP packet");
-            return;
-        }
+        // Allow MEDIA_TRANSFER_APP protocol packets through MQTT for cross-band relay.
+        // Previously blocked entirely to prevent phone duplicates, but this also blocked
+        // cross-band media delivery (e.g., 915 MHz → MQTT → 144 MHz). The iOS app handles
+        // deduplication via transfer ID, so it's safe to let these through.
+        // Note: media packets are rare (user-initiated) so MQTT bandwidth impact is minimal.
     }
     // Either encrypted packet (we couldn't decrypt) is marked as pki_encrypted, or we could decode the PKI encrypted packet
     bool isPKIEncrypted = mp_encrypted.pki_encrypted || mp_decoded.pki_encrypted;
