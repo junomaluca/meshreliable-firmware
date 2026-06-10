@@ -102,7 +102,7 @@ abandoned the transfer. The long window lets voice/image approach ~100%.
 ## 6. USB-CDC writes must be non-blocking (anti media-load watchdog reset)
 
 **File:** `src/SerialConsole.cpp` (guarded for `ESP32S2/S3/C3/C6`).
-**Invariant:** `Port.setTxTimeoutMs(0)` after `Port.begin()`.
+**Invariant:** `Port.setTxTimeoutMs(100)` after `Port.begin()` — a small, NON-ZERO bound.
 
 **Why / bug prevented:** on ESP32-S3 the console is HWCDC. Under heavy serial output
 (media-transfer packet forwarding) a **blocking** CDC write stalls the loop task long
@@ -110,7 +110,7 @@ enough to trip the task watchdog → chip reset → USB re-enumerates (host sees
 "Device not configured" mid-transfer). Non-blocking writes drop a few console bytes
 instead of resetting.
 
-**DO NOT** remove the `setTxTimeoutMs(0)` call.
+**DO NOT** remove the call, and **DO NOT set it to 0** — 0 (fully non-blocking) drops bytes during the connect-time config dump, corrupting the protobuf stream so the phone/CLI handshake never completes (observed: `Error parsing FromRadio`, every device unresponsive to --info). Keep a small non-zero value (~100 ms).
 
 ---
 

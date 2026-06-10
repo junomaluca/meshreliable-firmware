@@ -97,12 +97,16 @@ SerialConsole::SerialConsole() : StreamAPI(&Port), RedirectablePrint(&Port), con
 #endif
 #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) ||                                                   \
     defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    // Make USB-CDC (HWCDC) writes NON-BLOCKING. Under heavy serial output — e.g. the
-    // media-transfer module forwarding START/CHUNK/COMPLETE packets — a blocking write
-    // can stall the loop task long enough to trip the task watchdog, which resets the
-    // chip and tears down the USB connection (host sees "Device not configured" and the
-    // device re-enumerates). Dropping a few console bytes is far better than a reset.
-    Port.setTxTimeoutMs(0);
+    // Bound (but do NOT zero) the USB-CDC (HWCDC) write timeout. Under heavy serial
+    // output — e.g. the media-transfer module forwarding START/CHUNK/COMPLETE packets —
+    // the default (effectively blocking) write can stall the loop task long enough to
+    // trip the task watchdog → chip reset → USB re-enumerates ("Device not configured").
+    // But setting it to 0 (fully non-blocking) drops bytes during the normal config-dump
+    // burst at connect, corrupting the protobuf stream so the phone/CLI handshake never
+    // completes ("Error parsing FromRadio"). 100 ms is the balance: the host drains the
+    // buffer in well under 100 ms during an active read, so no handshake drops, yet a
+    // single write can never block anywhere near the multi-second loop watchdog.
+    Port.setTxTimeoutMs(100);
 #endif
 #if !ARCH_PORTDUINO
     emitRebooted();
