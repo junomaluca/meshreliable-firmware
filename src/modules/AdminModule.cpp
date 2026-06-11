@@ -958,8 +958,14 @@ bool AdminModule::handleSetModuleConfig(const meshtastic_ModuleConfig &c)
         if (!MQTT::isValidConfig(c.payload_variant.mqtt)) {
             return false;
         }
-        // Disable Bluetooth to prevent interference during MQTT configuration
-        disableBluetooth();
+        // Disable Bluetooth to prevent interference during MQTT configuration — but NOT while
+        // an edit transaction is open. Over BLE, deinit'ing the NimBLE stack here drops the
+        // link before the client's commit_edit_settings arrives, so saveChanges() (which defers
+        // the disk write until commit) never fires and the change is silently lost. Serial is
+        // unaffected, which is why USB config works but BLE/app/web does not. In a transaction
+        // the commit_edit_settings handler disables BT *after* the config is committed.
+        if (!hasOpenEditTransaction)
+            disableBluetooth();
         moduleConfig.has_mqtt = true;
         moduleConfig.mqtt = c.payload_variant.mqtt;
 #endif
@@ -972,7 +978,10 @@ bool AdminModule::handleSetModuleConfig(const meshtastic_ModuleConfig &c)
             LOG_ERROR("Invalid serial config");
             return false;
         }
-        disableBluetooth(); // Disable Bluetooth to prevent interference during Serial configuration
+        // Same fix as the MQTT case: deinit'ing BLE here drops the link before the client's
+        // commit_edit_settings arrives, so the change is never saved over BLE. Defer to commit.
+        if (!hasOpenEditTransaction)
+            disableBluetooth();
 #endif
         moduleConfig.has_serial = true;
         moduleConfig.serial = c.payload_variant.serial;
