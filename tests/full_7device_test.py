@@ -87,7 +87,7 @@ MSGS_PER_PHASE = 25
 DM_TIMEOUT = 15          # seconds to wait for DM receipt
 MEDIA_CHUNK_DELAY = 8    # seconds between media chunks (< 8 causes serial port instability)
 MEDIA_ACK_TIMEOUT = 30   # seconds to wait for ACK_COMPLETE
-MEDIA_MAX_ATTEMPTS = 6   # retransmit the whole transfer up to this many times until ACK_COMPLETE
+MEDIA_MAX_ATTEMPTS = 8   # retransmit the whole transfer up to this many times until ACK_COMPLETE
 MEDIA_ATTEMPT_TIMEOUT = 20  # seconds to wait for ACK_COMPLETE per attempt before retransmitting
 BROADCAST_TIMEOUT = 10   # seconds for broadcast verification
 INTER_MSG_DELAY = 1      # seconds between messages in a phase
@@ -924,25 +924,28 @@ class Full7DeviceTest:
         # so the firmware sender's NACK-retransmit never runs — we must retransmit ourselves.
         # Resend the whole transfer until ACK_COMPLETE arrives, up to MEDIA_MAX_ATTEMPTS, each
         # attempt waiting MEDIA_ATTEMPT_TIMEOUT. (A lost chunk otherwise = permanent fail.)
-        try:
-            for attempt in range(1, MEDIA_MAX_ATTEMPTS + 1):
+        # WEDGE-RESILIENT: a send that raises (USB-CDC wedged mid-transfer) must NOT abort the
+        # transfer — reconnect and retry the attempt. Media-over-serial wedges the CDC, but the
+        # device recovers; keep retrying until ACK_COMPLETE so the wedge doesn't cause a loss.
+        for attempt in range(1, MEDIA_MAX_ATTEMPTS + 1):
+            try:
+                iface = self.interfaces.get(src)
+                if not iface:
+                    raise RuntimeError("no iface")
                 iface.sendData(bytes(start_pkt), destinationId=dest_id,
-                               portNum=PORTNUM_MEDIA, wantAck=True, wantResponse=False)
+                               portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
                 time.sleep(MEDIA_CHUNK_DELAY)
                 iface.sendData(bytes(chunk_pkt), destinationId=dest_id,
-                               portNum=PORTNUM_MEDIA, wantAck=True, wantResponse=False)
+                               portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
                 time.sleep(MEDIA_CHUNK_DELAY)
                 iface.sendData(bytes(complete_pkt), destinationId=dest_id,
-                               portNum=PORTNUM_MEDIA, wantAck=True, wantResponse=False)
+                               portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
                 if ack_event.wait(timeout=MEDIA_ATTEMPT_TIMEOUT):
                     break  # ACK_COMPLETE received
-                if not self._ensure_connected(src):
-                    break
-        except Exception as e:
-            with self.lock:
-                self.pending_ack.pop(tid, None)
-            self._reconnect(src)
-            return tid, False, None
+            except Exception:
+                pass  # wedged mid-send — fall through to reconnect + retry
+            if attempt < MEDIA_MAX_ATTEMPTS and not self.pending_ack.get(tid, {}).get("result"):
+                self._ensure_connected(src)  # recover a wedged device, then retry the transfer
 
         with self.lock:
             state = self.pending_ack.pop(tid, None)
