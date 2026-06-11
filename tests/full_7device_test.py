@@ -1528,7 +1528,7 @@ class Full7DeviceTest:
             else:
                 self._record_failure(src)
 
-            time.sleep(INTER_MSG_DELAY)
+            time.sleep(int(os.environ.get("GROUP_SEND_DELAY", INTER_MSG_DELAY)))
 
     def run_phase_group_voice(self):
         """Phase 7: Group voice memos via media transfer broadcast."""
