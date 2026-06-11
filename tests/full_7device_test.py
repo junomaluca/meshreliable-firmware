@@ -927,13 +927,13 @@ class Full7DeviceTest:
         try:
             for attempt in range(1, MEDIA_MAX_ATTEMPTS + 1):
                 iface.sendData(bytes(start_pkt), destinationId=dest_id,
-                               portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
+                               portNum=PORTNUM_MEDIA, wantAck=True, wantResponse=False)
                 time.sleep(MEDIA_CHUNK_DELAY)
                 iface.sendData(bytes(chunk_pkt), destinationId=dest_id,
-                               portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
+                               portNum=PORTNUM_MEDIA, wantAck=True, wantResponse=False)
                 time.sleep(MEDIA_CHUNK_DELAY)
                 iface.sendData(bytes(complete_pkt), destinationId=dest_id,
-                               portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
+                               portNum=PORTNUM_MEDIA, wantAck=True, wantResponse=False)
                 if ack_event.wait(timeout=MEDIA_ATTEMPT_TIMEOUT):
                     break  # ACK_COMPLETE received
                 if not self._ensure_connected(src):
