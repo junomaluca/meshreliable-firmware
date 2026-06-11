@@ -208,32 +208,32 @@ bool MediaTransferModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp
              decoded->type, decoded->transfer_id, mp.from, mp.to,
              decoded->chunk_data.size);
 
+    // CONSUME (return true) every in-transfer media packet — START/CHUNK/COMPLETE/NACK — so
+    // NONE of them are forwarded to the USB-CDC. Forwarding them under transfer load floods
+    // the CDC, which drops bytes (setTxTimeoutMs) → corrupted protobuf → host "serial LOST" →
+    // failures (high variance, 17-100%). The receiver reassembles internally + delivers the
+    // COMPLETE media via the completion callback. ONLY ACK_COMPLETE is forwarded (one packet
+    // per transfer) — that's the delivery confirmation the host measures success by.
     switch (decoded->type) {
     case meshtastic_MediaTransferType_MEDIA_START:
         handleMediaStart(mp, *decoded);
-        break;
+        return true;
     case meshtastic_MediaTransferType_MEDIA_CHUNK:
         handleMediaChunk(mp, *decoded);
-        // CONSUME chunks — do NOT forward each one to the phone/serial. Forwarding every
-        // received chunk floods the USB-CDC, which drops bytes (setTxTimeoutMs) → corrupted
-        // protobuf → the host loses sync ("serial LOST") → media transfers fail. The receiver
-        // reassembles internally and delivers the COMPLETE media via the completion callback,
-        // and the host measures success via ACK_COMPLETE — neither needs raw chunks on serial.
         return true;
     case meshtastic_MediaTransferType_MEDIA_COMPLETE:
         handleMediaComplete(mp, *decoded);
-        break;
+        return true;
     case meshtastic_MediaTransferType_MEDIA_NACK:
         handleMediaNack(mp, *decoded);
-        // Forward NACK to serial/phone for diagnostic visibility
-        return false;
+        return true;
     case meshtastic_MediaTransferType_MEDIA_ACK_COMPLETE:
         handleMediaAckComplete(mp, *decoded);
-        // Forward ACK_COMPLETE to serial/phone for delivery confirmation
+        // Forward ACK_COMPLETE — the one packet/transfer the host needs (delivery confirmation).
         return false;
     case meshtastic_MediaTransferType_MEDIA_CANCEL:
         handleMediaCancel(mp, *decoded);
-        return false;
+        return true;
     default:
         LOG_WARN("MediaXfer: unknown type %d", decoded->type);
         break;
