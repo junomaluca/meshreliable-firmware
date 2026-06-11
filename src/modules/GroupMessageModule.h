@@ -84,7 +84,7 @@ class GroupMessageModule : private concurrency::OSThread, public ProtobufModule<
     void handleRosterResponse(const meshtastic_MeshPacket &mp, const meshtastic_GroupMessage &decoded);
 
     // Send an ACK for a received group message
-    void sendAck(uint8_t channelIndex, uint32_t messageId, uint32_t groupId);
+    void sendAck(uint8_t channelIndex, uint32_t messageId, uint32_t groupId, uint32_t toNode);
 
     // Send ALL_ACKED notification when all members have acknowledged
     void sendAllAcked(uint8_t channelIndex, uint32_t messageId, uint32_t groupId);

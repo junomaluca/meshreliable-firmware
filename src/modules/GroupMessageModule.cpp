@@ -159,7 +159,7 @@ void GroupMessageModule::handleGroupText(const meshtastic_MeshPacket &mp, const 
     }
 
     // Send ACK back to sender
-    sendAck(mp.channel, decoded.message_id, decoded.group_id);
+    sendAck(mp.channel, decoded.message_id, decoded.group_id, mp.from);
 
     // The text message content is available in decoded.text for the UI/client to display
     LOG_INFO("GroupMsg: ACKed message %u from 0x%08x", decoded.message_id, mp.from);
@@ -283,7 +283,7 @@ void GroupMessageModule::sendGroupText(uint8_t channelIndex, const char *text,
     LOG_INFO("GroupMsg: sent TEXT msgId=%u to %d members on channel %d", msgId, memberCount, channelIndex);
 }
 
-void GroupMessageModule::sendAck(uint8_t channelIndex, uint32_t messageId, uint32_t groupId)
+void GroupMessageModule::sendAck(uint8_t channelIndex, uint32_t messageId, uint32_t groupId, uint32_t toNode)
 {
     meshtastic_GroupMessage ack = meshtastic_GroupMessage_init_zero;
     ack.type = meshtastic_GroupMessageType_GROUP_ACK;
@@ -291,8 +291,16 @@ void GroupMessageModule::sendAck(uint8_t channelIndex, uint32_t messageId, uint3
     ack.group_id = groupId;
     ack.member_node_id = nodeDB->getNodeNum();
 
-    sendGroupPacket(channelIndex, ack);
-    LOG_DEBUG("GroupMsg: sent ACK for msgId=%u on channel %d", messageId, channelIndex);
+    // Send the ACK as a RELIABLE UNICAST back to the original sender (want_ack -> routed
+    // end-to-end ACK + retry), NOT a fire-and-forget broadcast. A broadcast ACK is easily
+    // lost, so the sender can't reliably detect "all members ACKed" even when delivery
+    // succeeded — which capped group success at ~p^N. A reliable ACK makes the round trip
+    // as dependable as a DM, so group delivery converges to ~100%.
+    if (toNode != 0 && toNode != NODENUM_BROADCAST)
+        sendGroupUnicast(channelIndex, ack, toNode);
+    else
+        sendGroupPacket(channelIndex, ack);
+    LOG_DEBUG("GroupMsg: sent ACK for msgId=%u to 0x%08x", messageId, toNode);
 }
 
 void GroupMessageModule::sendAllAcked(uint8_t channelIndex, uint32_t messageId, uint32_t groupId)
