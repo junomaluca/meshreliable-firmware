@@ -257,8 +257,18 @@ void GroupMessageModule::sendGroupText(uint8_t channelIndex, const char *text,
     msg.send_time = getTime();
     msg.rebroadcast_count = 0;
 
-    // Send the message as a broadcast on the channel
-    sendGroupPacket(channelIndex, msg);
+    // Deliver as N RELIABLE UNICASTS — one per member — i.e. literally "group = N DMs".
+    // A broadcast loses ~30% per member on the first shot (vs ~0% for a DM), and the slower
+    // rebroadcast retry doesn't always finish inside the measurement window. Sending each
+    // member a want_ack unicast gives every member the routed end-to-end ACK + 24h persistent
+    // retry that makes DMs ~100% — so group delivery converges to ~100% too. runOnce() still
+    // re-unicasts any member that hasn't ACKed, as a backstop.
+    uint32_t ourNode = nodeDB->getNodeNum();
+    for (uint8_t i = 0; i < memberCount; i++) {
+        if (memberNodeIds[i] == ourNode)
+            continue;
+        sendGroupUnicast(channelIndex, msg, memberNodeIds[i]);
+    }
 
     // Set up ACK tracking
     if (ackTrackers.size() >= MAX_TRACKED_MESSAGES) {
