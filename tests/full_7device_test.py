@@ -95,7 +95,8 @@ MAX_RECONNECTS = 4       # give up on a chronically-dropping device after this m
 # Known-flaky USB ports to skip in discovery (device is on the mesh via radio, but its
 # USB-CDC handshake won't complete and floods parse errors that jam setup). VHF-A
 # (tbeam-s3-core, 1101) has a chronic CDC handshake issue post-factory-flash.
-SKIP_USB_PORTS = set()  # VHF-A (1101) recovered + handshakes again as of 2026-06-10
+import os as _os
+SKIP_USB_PORTS = set(_os.environ.get("SKIP_PORTS","/dev/cu.usbmodem1101").split(",")) if _os.environ.get("SKIP_PORTS") is not None else {"/dev/cu.usbmodem1101"}
 RETRY_RECONCILE_GRACE = 300  # DM-A: success measured 5 MIN after send (MeshReliable persistent retry).
                              # After each phase, wait this long and upgrade messages the retries
                              # delivered after the per-message timeout. The last-sent message in a phase
@@ -778,13 +779,21 @@ class Full7DeviceTest:
         return None
 
     def _get_all_ids(self):
-        """Return list of all known node IDs."""
+        """Return list of all known node IDs. If GROUP_MEMBERS env is set (comma-separated
+        device names, e.g. 'T3S3,XIAO,Pager'), restrict the group roster to just those —
+        used to test the group protocol among reliable same-band members."""
+        restrict = os.environ.get("GROUP_MEMBERS")
+        allow = {n.strip() for n in restrict.split(",")} if restrict else None
         ids = []
         for name in USB_DEVICES:
+            if allow is not None and name not in allow:
+                continue
             nid = USB_DEVICES[name]["id"]
             if nid:
                 ids.append(nid)
         for name in REMOTE_DEVICES:
+            if allow is not None and name not in allow:
+                continue
             nid = REMOTE_DEVICES[name]["id"]
             if nid:
                 ids.append(nid)
@@ -1296,6 +1305,29 @@ class Full7DeviceTest:
         up = sum(1 for r in failed if r["success"])
         log(f"  [DM-A] {up}/{len(failed)} late deliveries; {phase} now "
             f"{self.phase_stats[phase]['ok']}/{self.phase_stats[phase]['sent']}")
+
+        # Per-member diagnostic for group phases: of the messages where member M was an
+        # expected (online) recipient, how many did M ACK? Pinpoints the bottleneck member.
+        if phase.startswith("group_"):
+            id2name = {d.get("id"): n for n, d in self.all_devices.items()}
+            expected = collections.Counter()
+            acked = collections.Counter()
+            for r in self.results:
+                if r["phase"] != phase:
+                    continue
+                meta = self.group_msg_meta.get(r.get("msg_id"))
+                if not meta:
+                    continue
+                online = set(meta.get("online", set())) - {meta.get("src_id")}
+                got = self.group_acks.get(meta["msg_id"], set())
+                for m in online:
+                    expected[m] += 1
+                    if m in got:
+                        acked[m] += 1
+            log("  [GRP] per-member ACK rate (acked / expected-as-recipient):")
+            for m in sorted(expected):
+                nm = id2name.get(m, f"0x{m:08x}")
+                log(f"        {nm:14} 0x{m:08x}  {acked[m]}/{expected[m]}")
 
     # ─── Round-Robin Target Selection ────────────────────────────────
 
