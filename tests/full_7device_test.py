@@ -87,8 +87,13 @@ MSGS_PER_PHASE = 25
 DM_TIMEOUT = 15          # seconds to wait for DM receipt
 MEDIA_CHUNK_DELAY = 8    # seconds between media chunks (< 8 causes serial port instability)
 MEDIA_ACK_TIMEOUT = 30   # seconds to wait for ACK_COMPLETE
+MEDIA_MAX_ATTEMPTS = 6   # retransmit the whole transfer up to this many times until ACK_COMPLETE
+MEDIA_ATTEMPT_TIMEOUT = 20  # seconds to wait for ACK_COMPLETE per attempt before retransmitting
 BROADCAST_TIMEOUT = 10   # seconds for broadcast verification
 INTER_MSG_DELAY = 1      # seconds between messages in a phase
+# MEDIA_SEND_DELAY: extra spacing between media transfers (media is many packets — like group,
+# rapid-fire saturates the channel). Env-overridable for realistic cadence.
+MEDIA_SEND_DELAY = int(os.environ.get("MEDIA_SEND_DELAY", "2"))
 GROUP_MSG_WAIT = 10       # seconds to wait for group msg delivery
 SEND_HANG_TIMEOUT = 20   # seconds before a send() is treated as hung (e.g. wedged pager USB-TX)
 MAX_RECONNECTS = 4       # give up on a chronically-dropping device after this many reconnects/phase-run
@@ -913,27 +918,35 @@ class Full7DeviceTest:
                 "rssi": None, "snr": None, "hops_away": 0, "path": "radio",
             }
 
+        # RELIABLE DELIVERY (lesson from DMs/group): the harness injects raw media packets,
+        # so the firmware sender's NACK-retransmit never runs — we must retransmit ourselves.
+        # Resend the whole transfer until ACK_COMPLETE arrives, up to MEDIA_MAX_ATTEMPTS, each
+        # attempt waiting MEDIA_ATTEMPT_TIMEOUT. (A lost chunk otherwise = permanent fail.)
         try:
-            iface.sendData(bytes(start_pkt), destinationId=dest_id,
-                           portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
-            time.sleep(MEDIA_CHUNK_DELAY)
-            iface.sendData(bytes(chunk_pkt), destinationId=dest_id,
-                           portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
-            time.sleep(MEDIA_CHUNK_DELAY)
-            iface.sendData(bytes(complete_pkt), destinationId=dest_id,
-                           portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
+            for attempt in range(1, MEDIA_MAX_ATTEMPTS + 1):
+                iface.sendData(bytes(start_pkt), destinationId=dest_id,
+                               portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
+                time.sleep(MEDIA_CHUNK_DELAY)
+                iface.sendData(bytes(chunk_pkt), destinationId=dest_id,
+                               portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
+                time.sleep(MEDIA_CHUNK_DELAY)
+                iface.sendData(bytes(complete_pkt), destinationId=dest_id,
+                               portNum=PORTNUM_MEDIA, wantAck=False, wantResponse=False)
+                if ack_event.wait(timeout=MEDIA_ATTEMPT_TIMEOUT):
+                    break  # ACK_COMPLETE received
+                if not self._ensure_connected(src):
+                    break
         except Exception as e:
             with self.lock:
                 self.pending_ack.pop(tid, None)
             self._reconnect(src)
             return tid, False, None
 
-        got = ack_event.wait(timeout=MEDIA_ACK_TIMEOUT)
         with self.lock:
             state = self.pending_ack.pop(tid, None)
 
         if state and state["result"] == "ACK_COMPLETE":
-            lat = state["rx_time"] - state["time"]
+            lat = (state["rx_time"] or time.time()) - state["time"]
             return tid, True, lat
         return tid, False, None
 
@@ -1435,7 +1448,7 @@ class Full7DeviceTest:
                 else:
                     self._record_failure(src)
 
-                time.sleep(INTER_MSG_DELAY)
+                time.sleep(INTER_MSG_DELAY + MEDIA_SEND_DELAY)
 
     def run_phase_image_dm(self):
         """Phase 4: Image DMs — media transfer with content_type=1."""
@@ -1480,7 +1493,7 @@ class Full7DeviceTest:
                 else:
                     self._record_failure(src)
 
-                time.sleep(INTER_MSG_DELAY)
+                time.sleep(INTER_MSG_DELAY + MEDIA_SEND_DELAY)
 
     def run_phase_group_text(self):
         """Phase 6: Group text messages on portnum 258."""
@@ -1852,8 +1865,23 @@ class Full7DeviceTest:
 
         start_time = time.time()
         group_only = os.environ.get("GROUP_ONLY") == "1"
+        media_only = os.environ.get("MEDIA_ONLY") == "1"
 
         try:
+            if media_only:
+                # Media-focused run: voice + image DMs only (with retransmit + spacing).
+                log(f"\n{'='*70}\n  MEDIA-ONLY RUN — voice + image DMs"
+                    f"  (max {MEDIA_MAX_ATTEMPTS} attempts/transfer, {MEDIA_SEND_DELAY}s spacing)\n{'='*70}")
+                self.run_phase_voice_dm()
+                self._reconcile_phase("voice_dm")
+                self.print_summary()
+                self._reset_phase()
+                self.run_phase_image_dm()
+                self._reconcile_phase("image_dm")
+                self.print_summary()
+                self._reset_phase()
+                return  # `finally` block generates the report
+
             if group_only:
                 # Group-text-focused run: setup + group text only.
                 members = self._get_all_ids()
