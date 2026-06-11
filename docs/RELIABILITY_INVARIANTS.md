@@ -114,6 +114,28 @@ instead of resetting.
 
 ---
 
+## 7b. BLE config-save: never deinit BLE mid-transaction (MQTT/Serial)
+
+**File:** `src/modules/AdminModule.cpp` → `handleSetModuleConfig()`, the `mqtt` and
+`serial` cases.
+**Invariant:** the `disableBluetooth()` calls in those two cases MUST be guarded by
+`if (!hasOpenEditTransaction)`.
+
+**Why / bug prevented:** clients (iOS app, official web client, python CLI) edit config
+in a `begin_edit → set → commit_edit` transaction. `saveChanges()` defers the disk write
+until `commit_edit_settings`. `disableBluetooth()` does `nimbleBluetooth->deinit()` —
+it tears down the link. Calling it *during* the MQTT/Serial set drops the BLE connection
+before the client's `commit` arrives, so the change is **never written to flash** —
+silently lost. Serial/USB is unaffected (that's why USB config persisted but BLE/app/web
+did not). In a transaction the `commit_edit_settings` handler disables BT *after* the
+commit, which is the correct place. Affects EVERY variant (shared AdminModule).
+
+**DO NOT** remove the `!hasOpenEditTransaction` guard from either case (re-introduces
+"settings don't save over BLE"). This is upstream behavior (commit `beb268ff25`); the
+guard is a MeshReliable fix.
+
+---
+
 ## 7. Test harness invariants (`tests/full_7device_test.py`)
 
 This harness took ~15 runs to get reliable on flaky hardware. Keep:
