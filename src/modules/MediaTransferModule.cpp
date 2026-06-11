@@ -214,7 +214,12 @@ bool MediaTransferModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp
         break;
     case meshtastic_MediaTransferType_MEDIA_CHUNK:
         handleMediaChunk(mp, *decoded);
-        break;
+        // CONSUME chunks — do NOT forward each one to the phone/serial. Forwarding every
+        // received chunk floods the USB-CDC, which drops bytes (setTxTimeoutMs) → corrupted
+        // protobuf → the host loses sync ("serial LOST") → media transfers fail. The receiver
+        // reassembles internally and delivers the COMPLETE media via the completion callback,
+        // and the host measures success via ACK_COMPLETE — neither needs raw chunks on serial.
+        return true;
     case meshtastic_MediaTransferType_MEDIA_COMPLETE:
         handleMediaComplete(mp, *decoded);
         break;
