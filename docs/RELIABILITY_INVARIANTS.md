@@ -161,6 +161,30 @@ instead of resetting.
 
 **DO NOT** remove the call, and **DO NOT set it to 0** — 0 (fully non-blocking) drops bytes during the connect-time config dump, corrupting the protobuf stream so the phone/CLI handshake never completes (observed: `Error parsing FromRadio`, every device unresponsive to --info). Keep a small non-zero value (~100 ms).
 
+### 6b. Protobuf frames must block-until-sent; only LOG writes are droppable
+
+**Files:** `src/mesh/StreamAPI.cpp` (`emitTxBuffer` wraps the frame write in
+`beginReliableTx()`/`endReliableTx()`), `src/mesh/StreamAPI.h` (virtual no-op hooks),
+`src/SerialConsole.cpp` / `.h` (overrides raise the CDC TX timeout to
+`SERIAL_TX_TIMEOUT_PROTOBUF_MS = 1000` for the frame, restore
+`SERIAL_TX_TIMEOUT_LOG_MS = 100` after).
+
+**Why / bug prevented:** the 100 ms bound in §6 is correct for LOG output (a flood must be
+droppable so it can't stall the loop into the 90 s task watchdog) but WRONG for the protobuf
+config/data frames — on a **busy node** (the 144 MHz↔MQTT gateway VHF T-Beam floods DEBUG
+logs at 0.5–2 KB/s) the 100 ms write drops bytes from the config response → torn frame →
+host `Timed out waiting for connection completion`. The symptom is "the device keeps losing
+USB connectivity": you can't (re)connect once it is busy, even though the firmware is fine.
+Validated: connect succeeds right after reset (low traffic), fails in steady state.
+
+The fix splits the two: log writes keep 100 ms (droppable, watchdog-safe); the protobuf
+frame write blocks up to 1000 ms (90× under the 90 s `APP_WATCHDOG_SECS`, and the host
+drains the buffer in ≪1 s while actively reading, so it only ever blocks briefly on a
+flooding node). Result: **6/6 handshakes at 2321 B/s flood (was 0/3).**
+
+**DO NOT** make `emitTxBuffer` use the short log timeout, and do not remove the
+`beginReliableTx`/`endReliableTx` hooks — the busy-node handshake failure returns.
+
 ---
 
 ## 7b. BLE config-save: never deinit BLE mid-transaction (MQTT/Serial)
