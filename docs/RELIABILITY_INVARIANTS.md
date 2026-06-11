@@ -117,6 +117,37 @@ abandoned the transfer. The long window lets voice/image approach ~100%.
 
 ---
 
+## 5b. Media: CONSUME MediaTransfer(259) packets — do NOT forward them to the phone/serial
+
+**File:** `src/modules/MediaTransferModule.cpp` → `handleReceivedProtobuf()` switch.
+**Invariant:** `MEDIA_START`, `MEDIA_CHUNK`, `MEDIA_COMPLETE`, `MEDIA_NACK`, `MEDIA_CANCEL`
+all `return true` (consume). ONLY `MEDIA_ACK_COMPLETE` returns `false` (forward — it is the
+host's per-transfer delivery confirmation).
+
+**Why / bug prevented:** forwarding every received MediaTransfer(259) packet to the phone
+floods the USB-CDC; with `setTxTimeoutMs(100)` the CDC then **drops bytes** → corrupted
+protobuf → the host loses frame sync ("serial LOST") → reconnect churn → media transfers
+fail. Symptom: wild run-to-run variance (image 17 %–100 %). Consuming the in-transfer
+packets removed the variance and took **voice to 100 % / image ~100 %** on the 915 mesh.
+
+**The app does NOT use the 259 packets** — so consuming them is safe. Received media is
+reassembled internally; on COMPLETE the `completionCallback` (set by `VoiceMemoModule`)
+re-forwards the finished media to the iOS app over **PRIVATE_APP (256)** using the app's
+own header format (`voiceMemoChunk=0x02` / `imageChunk=0x05`, see `MeshReliableService`).
+The 259 forward was only ever for test monitoring, which the host doesn't need (it scores
+via ACK_COMPLETE). NOTE: this supersedes the older "MediaTransferModule returns false"
+remark in §4.1 — that was about the group module; media now consumes.
+
+**DO NOT** change these cases back to `return false` / `break` (re-introduces the CDC
+flood and the high-variance media failures). Real media uses BLE+PRIVATE_APP, unaffected.
+
+**Test harness** (`tests/full_7device_test.py`): media must **retransmit the whole transfer
+until ACK_COMPLETE** (the harness injects raw packets, so the firmware sender's retransmit
+never runs), be **wedge-resilient** (reconnect + retry on a send that raises), and **space**
+transfers (`MEDIA_SEND_DELAY`). `_reconnect` must null-check `getMyNodeInfo()`.
+
+---
+
 ## 6. USB-CDC writes must be non-blocking (anti media-load watchdog reset)
 
 **File:** `src/SerialConsole.cpp` (guarded for `ESP32S2/S3/C3/C6`).
