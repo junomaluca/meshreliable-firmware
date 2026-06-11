@@ -307,10 +307,33 @@ void GroupMessageModule::rebroadcastMessage(GroupAckTracker &tracker)
     tracker.lastRebroadcast = millis();
     tracker.originalMsg.rebroadcast_count = tracker.rebroadcastCount;
 
-    sendGroupPacket(tracker.channel, tracker.originalMsg);
-    LOG_INFO("GroupMsg: rebroadcast #%d for msgId=%u (%d/%d ACKs)",
-             tracker.rebroadcastCount, tracker.messageId,
-             tracker.ackedBy.size(), tracker.members.size());
+    // HYBRID delivery: the FIRST attempt is a broadcast (one transmission reaches every
+    // in-range, same-band member at once). The RETRY, however, is a RELIABLE UNICAST to
+    // each member that hasn't ACKed yet — not another broadcast. A broadcast is
+    // fire-and-forget (no link-layer ACK) and never crosses bands; a want_ack unicast gets
+    // the routed end-to-end ACK + 24h persistent retry (the proven DM mechanism), so an
+    // un-ACKed member — including cross-band (MQTT-routed) or temporarily-offline ones — is
+    // delivered to reliably and independently, without one straggler blocking the rest.
+    uint32_t ourNode = nodeDB->getNodeNum();
+    uint8_t sent = 0;
+    for (uint32_t member : tracker.members) {
+        if (member == ourNode)
+            continue; // never unicast to ourselves
+        bool acked = false;
+        for (uint32_t a : tracker.ackedBy) {
+            if (a == member) {
+                acked = true;
+                break;
+            }
+        }
+        if (acked)
+            continue;
+        sendGroupUnicast(tracker.channel, tracker.originalMsg, member);
+        sent++;
+    }
+    LOG_INFO("GroupMsg: reliable-unicast retry #%d for msgId=%u to %d un-ACKed member(s) (%d/%d ACKed)",
+             tracker.rebroadcastCount, tracker.messageId, sent, (int)tracker.ackedBy.size(),
+             (int)tracker.members.size());
 }
 
 bool GroupMessageModule::hasAcked(const GroupAckTracker &tracker, uint32_t nodeId)
@@ -331,6 +354,21 @@ void GroupMessageModule::sendGroupPacket(uint8_t channelIndex, const meshtastic_
     p->want_ack = false; // We handle ACKs at the group message layer, not the mesh layer
     p->decoded.want_response = false;
     p->priority = meshtastic_MeshPacket_Priority_DEFAULT;
+
+    service->sendToMesh(p);
+}
+
+void GroupMessageModule::sendGroupUnicast(uint8_t channelIndex, const meshtastic_GroupMessage &payload, uint32_t toNode)
+{
+    meshtastic_MeshPacket *p = allocDataProtobuf(payload);
+    p->to = toNode;
+    p->channel = channelIndex;
+    // Reliable unicast: the router/NextHopRouter gives this an end-to-end ACK and the
+    // MeshReliable persistent retry (24h) — i.e. the same machinery that makes DMs ~100%.
+    // The recipient still replies with a GROUP_ACK, which marks it ACKed in the tracker.
+    p->want_ack = true;
+    p->decoded.want_response = false;
+    p->priority = meshtastic_MeshPacket_Priority_RELIABLE;
 
     service->sendToMesh(p);
 }

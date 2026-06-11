@@ -55,11 +55,10 @@ from pubsub import pub
 # ─── Configuration ───────────────────────────────────────────────────────
 
 USB_DEVICES = {
-    "Pager":  {"port": "/dev/cu.usbmodem101",   "id": None, "hw": "T_LORA_PAGER"},
-    # "VHF" (Supreme A, 1101, tbeam-s3-core) HARD-WEDGED 2026-06-09: firmware hung,
-    # unresponsive to meshtastic AND esptool (default_reset + usb_reset both "No serial
-    # data received"). Needs a physical power-cycle/BOOT-button — can't recover remotely.
-    "BPF":    {"port": "/dev/cu.usbmodem313101", "id": None, "hw": "TBEAM_BPF"},  # was 21101, re-enumerated after replug
+    # Ports here are only initial hints — discovery re-assigns by node number across all ports.
+    "Pager":  {"port": "/dev/cu.usbmodem313101", "id": None, "hw": "T_LORA_PAGER"},
+    "VHF":    {"port": "/dev/cu.usbmodem1101",   "id": None, "hw": "TBEAM_S3_CORE"},  # VHF-A recovered 2026-06-10
+    "BPF":    {"port": "/dev/cu.usbmodem101",    "id": None, "hw": "TBEAM_BPF"},
     "T3S3":   {"port": "/dev/cu.usbmodem21201",  "id": None, "hw": "TLORA_T3_S3"},
     "XIAO":   {"port": "/dev/cu.usbmodem31201",  "id": None, "hw": "SEEED_XIAO_S3"},
 }
@@ -93,8 +92,14 @@ INTER_MSG_DELAY = 1      # seconds between messages in a phase
 GROUP_MSG_WAIT = 10       # seconds to wait for group msg delivery
 SEND_HANG_TIMEOUT = 20   # seconds before a send() is treated as hung (e.g. wedged pager USB-TX)
 MAX_RECONNECTS = 4       # give up on a chronically-dropping device after this many reconnects/phase-run
-RETRY_RECONCILE_GRACE = 180  # DM-A: after a phase, wait this long for firmware retries to land, then
-                             # upgrade messages that were delivered after the per-message timeout
+# Known-flaky USB ports to skip in discovery (device is on the mesh via radio, but its
+# USB-CDC handshake won't complete and floods parse errors that jam setup). VHF-A
+# (tbeam-s3-core, 1101) has a chronic CDC handshake issue post-factory-flash.
+SKIP_USB_PORTS = set()  # VHF-A (1101) recovered + handshakes again as of 2026-06-10
+RETRY_RECONCILE_GRACE = 300  # DM-A: success measured 5 MIN after send (MeshReliable persistent retry).
+                             # After each phase, wait this long and upgrade messages the retries
+                             # delivered after the per-message timeout. The last-sent message in a phase
+                             # gets a full 5 min; earlier ones get phase-duration + 5 min.
 
 # Stable owner longNames per device — used for identity-based (re)discovery across ports.
 NAME_TO_LONGNAME = {
@@ -363,6 +368,9 @@ class Full7DeviceTest:
         # can still be counted in a post-phase reconciliation pass.
         self.delivered_tags = collections.defaultdict(set)  # tag -> set(receiver names)
         self.tracked_tags = set()                            # every tag we've sent this run
+        # Group-message ACK tracking: a member is "delivered" when it returns a GROUP_ACK.
+        self.group_acks = collections.defaultdict(set)       # msg_id -> set(member node IDs that ACKed)
+        self.group_msg_meta = {}                             # tag -> {msg_id, src_id, online: set(node IDs)}
 
     # ─── Setup ───────────────────────────────────────────────────────
 
@@ -383,13 +391,25 @@ class Full7DeviceTest:
         # port re-enumeration from replugs (ports AND node-nums shuffle; only the
         # owner longName / deviceId are stable). No hardcoded port is trusted.
         import glob as _glob
+        # Match by STABLE node number first (churn-proof, MAC-anchored) — names have drifted
+        # (VHF-A renamed "VHF-A", BPF A briefly "Supreme A"), so longName is only a fallback.
+        usb_num_to_name = {
+            0x5c1a0bc9: "Pager",  # Pager A
+            0x335e1be8: "VHF",    # VHF-A (Supreme A)
+            0x16d3ef94: "BPF",    # BPF A
+            0x61741de3: "T3S3",   # T3S3-1
+            0x5c68527e: "XIAO",   # XIAO A
+        }
         usb_longname_to_name = {
-            "pager a": "Pager", "supreme a": "VHF", "bpf a": "BPF",
+            "pager a": "Pager", "supreme a": "VHF", "vhf-a": "VHF", "bpf a": "BPF",
             "t3s3-1": "T3S3", "xiao a": "XIAO",
         }
         ports = sorted(_glob.glob("/dev/cu.usbmodem*"))
         log(f"Scanning {len(ports)} USB ports by device identity...")
         for port in ports:
+            if port in SKIP_USB_PORTS:
+                log(f"  {port}: SKIPPING (known-flaky USB-CDC; device is on the mesh via radio)", "WARN")
+                continue
             # Retry probe — these radios often time out on the FIRST connect attempt
             # (esp. the Pager) then answer on the second. A single probe dropped them.
             connected = False
@@ -401,7 +421,7 @@ class Full7DeviceTest:
                     node = iface.getMyNodeInfo()
                     num = node.get("num", 0)
                     ln = (node.get("user", {}).get("longName") or "").strip()
-                    name = usb_longname_to_name.get(ln.lower())
+                    name = usb_num_to_name.get(num) or usb_longname_to_name.get(ln.lower())
                     if not name:
                         log(f"  {port}: '{ln}' not a known USB test device — skipping", "WARN")
                         iface.close(); break
@@ -565,6 +585,16 @@ class Full7DeviceTest:
 
         # Group messages (portnum 258)
         if portnum in (258, "GROUP_MESSAGE_APP", ""):
+            # Capture GROUP_ACK (type=3): a member confirming it received a group message.
+            # This is the definitive per-member delivery signal ("...have acked").
+            if isinstance(payload, (bytes, bytearray)):
+                gfields = _dec_fields(payload)
+                if gfields.get(1) == 3:  # GROUP_ACK
+                    ack_mid = gfields.get(6)        # ack_message_id
+                    member = gfields.get(7)         # member_node_id
+                    if ack_mid and member:
+                        with self.lock:
+                            self.group_acks[ack_mid].add(member)
             with self.lock:
                 for tid, info in list(self.pending_rx.items()):
                     if info.get("is_group") and not info["event"].is_set():
@@ -943,6 +973,44 @@ class Full7DeviceTest:
 
     # ─── Group Messages ──────────────────────────────────────────────
 
+    def _online_member_ids(self, members):
+        """Subset of `members` (node IDs) online in the last 10 min. USB-connected devices
+        are always online; remotes are judged by the most-recent nodeDB lastHeard."""
+        usb_ids = {d["id"] for d in self.all_devices.values() if d.get("usb") and d.get("id")}
+        now = time.time()
+        heard = {}
+        for iface in list(self.interfaces.values()):
+            try:
+                for _, ninfo in (iface.nodes or {}).items():
+                    num = ninfo.get("num", 0)
+                    lh = ninfo.get("lastHeard", 0) or 0
+                    if num:
+                        heard[num] = max(heard.get(num, 0), lh)
+            except Exception:
+                pass
+        online = set()
+        for m in members:
+            if m in usb_ids or (now - heard.get(m, 0) <= 600):
+                online.add(m)
+        return online
+
+    def _group_success(self, tag, info=None):
+        """A group message is delivered when every member online in the last 10 min (except
+        the sender) has ACKed it (GROUP_ACK), or — for USB members — its _on_rx saw the text."""
+        meta = self.group_msg_meta.get(tag)
+        if not meta:
+            return False
+        online = set(meta.get("online", set())) - {meta.get("src_id")}
+        if not online:
+            return True  # no other online members to deliver to
+        delivered = set(self.group_acks.get(meta["msg_id"], set()))
+        if info:
+            nm2id = {n: d.get("id") for n, d in self.all_devices.items()}
+            for rn in info.get("received_by", set()):
+                if nm2id.get(rn):
+                    delivered.add(nm2id[rn])
+        return online.issubset(delivered)
+
     def _send_group_text(self, src, tracking_tag):
         """Send GROUP_TEXT on portnum 258, broadcast on maluca channel."""
         iface = self.interfaces.get(src)
@@ -952,6 +1020,11 @@ class Full7DeviceTest:
         members = self._get_all_ids()
         msg_id = random.randint(1, 0xFFFFFFFF)
         text = f"{tracking_tag} grptxt"
+        self.group_msg_meta[tracking_tag] = {
+            "msg_id": msg_id,
+            "src_id": self.all_devices.get(src, {}).get("id"),
+            "online": self._online_member_ids(members),
+        }
 
         payload = bytearray()
         payload.extend(_fv_force(1, 0))        # type=GROUP_TEXT (0)
@@ -982,14 +1055,13 @@ class Full7DeviceTest:
             self._reconnect(src)
             return False
 
-        got = event.wait(timeout=GROUP_MSG_WAIT)
+        event.wait(timeout=GROUP_MSG_WAIT)
         with self.lock:
             info = self.pending_rx.pop(tracking_tag, {})
-
-        # Fall back to iOS-app reception when USB receivers are disconnected.
-        if not got and self.ios.available and self.ios.check_message(tracking_tag, timeout=4):
-            return True
-        return got
+        # Success = every member online in the last 10 min (except the sender) has ACKed
+        # (or its USB _on_rx saw the text). The 5-min reconciliation re-checks as the
+        # hybrid reliable-unicast retries land more ACKs.
+        return self._group_success(tracking_tag, info)
 
     def _send_group_voice(self, src, tracking_tag):
         """Send voice memo as broadcast to group via media transfer."""
@@ -1205,7 +1277,12 @@ class Full7DeviceTest:
                 tag = r.get("msg_id")
                 if not tag:
                     continue
-                got = len(self.delivered_tags.get(tag, ())) > 0
+                if phase.startswith("group_"):
+                    # Group success = all online members ACKed (hybrid reliable-unicast retries
+                    # keep landing ACKs over the 5-min window).
+                    got = self._group_success(tag)
+                else:
+                    got = len(self.delivered_tags.get(tag, ())) > 0
                 if not got and self.ios.available and self.ios.check_message(tag, timeout=2):
                     got = True
                 if got:
@@ -1734,8 +1811,23 @@ class Full7DeviceTest:
             return
 
         start_time = time.time()
+        group_only = os.environ.get("GROUP_ONLY") == "1"
 
         try:
+            if group_only:
+                # Group-text-focused run: setup + group text only.
+                members = self._get_all_ids()
+                online = self._online_member_ids(members)
+                log(f"\n{'='*70}\n  GROUP-ONLY RUN — group text")
+                log(f"  Members: {len(members)}  |  online (<10min): {len(online)} "
+                    f"-> {[f'0x{m:08x}' for m in online]}\n{'='*70}")
+                for _ in range(int(os.environ.get("GROUP_ROUNDS", "1"))):
+                    self.run_phase_group_text()
+                    self._reconcile_phase("group_text")
+                    self.print_summary()
+                    self._reset_phase()
+                return  # `finally` block generates the report
+
             # Phase 2: Text DMs
             self.run_phase_text_dm()
             self._reconcile_phase("text_dm")

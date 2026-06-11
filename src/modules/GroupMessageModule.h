@@ -95,8 +95,13 @@ class GroupMessageModule : private concurrency::OSThread, public ProtobufModule<
     // Check if a node ID is in the ACKed list
     bool hasAcked(const GroupAckTracker &tracker, uint32_t nodeId);
 
-    // Send a GroupMessage protobuf on a channel
+    // Send a GroupMessage protobuf as a channel broadcast
     void sendGroupPacket(uint8_t channelIndex, const meshtastic_GroupMessage &payload);
+
+    // Send a GroupMessage protobuf as a RELIABLE UNICAST to one member (want_ack → routed
+    // end-to-end ACK + persistent retry, the same mechanism that makes DMs ~100%). Used by
+    // the retry path so un-ACKed / cross-band / offline members get DM-grade delivery.
+    void sendGroupUnicast(uint8_t channelIndex, const meshtastic_GroupMessage &payload, uint32_t toNode);
 };
 
 extern GroupMessageModule *groupMessageModule;
