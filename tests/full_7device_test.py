@@ -721,7 +721,9 @@ class Full7DeviceTest:
             if not ok or not res:
                 continue  # hung/failed open — abandon this port
             iface, node = res
-            ln = (node.get("user", {}).get("longName") or "").strip().lower()
+            if not node:  # getMyNodeInfo() returned None — handshake not complete; skip port
+                run_with_timeout(lambda: iface.close(), 4); continue
+            ln = ((node.get("user") or {}).get("longName") or "").strip().lower()
             if want and ln != want:
                 run_with_timeout(lambda: iface.close(), 4); continue
             num = node.get("num", 0)
