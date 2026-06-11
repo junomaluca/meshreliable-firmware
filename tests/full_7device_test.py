@@ -94,6 +94,9 @@ INTER_MSG_DELAY = 1      # seconds between messages in a phase
 # MEDIA_SEND_DELAY: extra spacing between media transfers (media is many packets — like group,
 # rapid-fire saturates the channel). Env-overridable for realistic cadence.
 MEDIA_SEND_DELAY = int(os.environ.get("MEDIA_SEND_DELAY", "2"))
+# DM_TARGETS: restrict DM senders AND targets to this set of device names (band isolation).
+# e.g. "T3S3,XIAO,Pager" = 915-only; "VHF,BPF" = 144-only. Empty = no restriction.
+DM_TARGETS = set(t.strip() for t in os.environ.get("DM_TARGETS", "").split(",") if t.strip()) or None
 GROUP_MSG_WAIT = 10       # seconds to wait for group msg delivery
 SEND_HANG_TIMEOUT = 20   # seconds before a send() is treated as hung (e.g. wedged pager USB-TX)
 MAX_RECONNECTS = 4       # give up on a chronically-dropping device after this many reconnects/phase-run
@@ -1366,6 +1369,8 @@ class Full7DeviceTest:
         else:
             candidates = [n for n in ALL_DEVICE_NAMES
                           if n != src and not self._should_skip(n) and self._get_dest_id(n)]
+        if DM_TARGETS:  # band isolation: only DM the named devices
+            candidates = [n for n in candidates if n in DM_TARGETS]
         if not candidates:
             return []
         targets = []
@@ -1381,7 +1386,8 @@ class Full7DeviceTest:
         log(f"  PHASE 2: TEXT DMs ({MSGS_PER_PHASE} messages)")
         log(f"{'='*70}")
 
-        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)]
+        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)
+                  and (not DM_TARGETS or n in DM_TARGETS)]
         msgs_per_device = MSGS_PER_PHASE // len(active) if active else 0
         extra = MSGS_PER_PHASE - msgs_per_device * len(active)
         sent = 0
@@ -1416,7 +1422,8 @@ class Full7DeviceTest:
         log(f"  PHASE 3: VOICE DMs ({MSGS_PER_PHASE} messages)")
         log(f"{'='*70}")
 
-        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)]
+        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)
+                  and (not DM_TARGETS or n in DM_TARGETS)]
         msgs_per_device = MSGS_PER_PHASE // len(active) if active else 0
         extra = MSGS_PER_PHASE - msgs_per_device * len(active)
         sent = 0
@@ -1461,7 +1468,8 @@ class Full7DeviceTest:
         log(f"  PHASE 4: IMAGE DMs ({MSGS_PER_PHASE} messages)")
         log(f"{'='*70}")
 
-        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)]
+        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)
+                  and (not DM_TARGETS or n in DM_TARGETS)]
         msgs_per_device = MSGS_PER_PHASE // len(active) if active else 0
         extra = MSGS_PER_PHASE - msgs_per_device * len(active)
         sent = 0
@@ -1506,7 +1514,8 @@ class Full7DeviceTest:
         log(f"  PHASE 6: GROUP TEXT ({MSGS_PER_PHASE} messages)")
         log(f"{'='*70}")
 
-        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)]
+        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)
+                  and (not DM_TARGETS or n in DM_TARGETS)]
         sent = 0
 
         for i in range(MSGS_PER_PHASE):
@@ -1554,7 +1563,8 @@ class Full7DeviceTest:
         log(f"  PHASE 7: GROUP VOICE ({MSGS_PER_PHASE} messages)")
         log(f"{'='*70}")
 
-        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)]
+        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)
+                  and (not DM_TARGETS or n in DM_TARGETS)]
         sent = 0
 
         for i in range(MSGS_PER_PHASE):
@@ -1595,7 +1605,8 @@ class Full7DeviceTest:
         log(f"  PHASE 8: GROUP IMAGE ({MSGS_PER_PHASE} messages)")
         log(f"{'='*70}")
 
-        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)]
+        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)
+                  and (not DM_TARGETS or n in DM_TARGETS)]
         sent = 0
 
         for i in range(MSGS_PER_PHASE):
@@ -1636,7 +1647,8 @@ class Full7DeviceTest:
         log(f"  PHASE 9: CHANNEL BROADCASTS ({MSGS_PER_PHASE} messages)")
         log(f"{'='*70}")
 
-        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)]
+        active = [n for n in USB_DEVICES if n in self.interfaces and not self._should_skip(n)
+                  and (not DM_TARGETS or n in DM_TARGETS)]
         sent = 0
 
         for i in range(MSGS_PER_PHASE):
