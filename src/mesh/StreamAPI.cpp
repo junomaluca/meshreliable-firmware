@@ -181,8 +181,13 @@ void StreamAPI::emitTxBuffer(size_t len)
         // Serialize stream writes against `emitLogRecord` so a LOG_ firing
         // mid-packet-emission can't interleave bytes on the wire.
         concurrency::LockGuard guard(&streamLock);
+        // Make the protobuf frame write reliable (subclass raises the CDC TX timeout):
+        // config + data frames must never be partially dropped, even when the buffer is
+        // full of pending log output on a busy node.
+        beginReliableTx();
         stream->write(txBuf, totalLen);
         stream->flush();
+        endReliableTx();
     }
 }
 

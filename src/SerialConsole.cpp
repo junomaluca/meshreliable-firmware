@@ -27,6 +27,13 @@
 // Defaulting to the formerly removed phone_timeout_secs value of 15 minutes
 #define SERIAL_CONNECTION_TIMEOUT (15 * 60) * 1000UL
 
+// ESP32 USB-CDC TX timeouts. Logs use the short bound so a flood can drop bytes rather than
+// block the loop into the task watchdog. Protobuf frames (handshake config + data) use the
+// long bound so they are NEVER partially dropped — the host drains the buffer in well under
+// this during an active read, so it only ever blocks briefly on a busy, log-flooding node.
+#define SERIAL_TX_TIMEOUT_LOG_MS 100
+#define SERIAL_TX_TIMEOUT_PROTOBUF_MS 1000
+
 SerialConsole *console;
 
 void consoleInit()
@@ -106,10 +113,31 @@ SerialConsole::SerialConsole() : StreamAPI(&Port), RedirectablePrint(&Port), con
     // completes ("Error parsing FromRadio"). 100 ms is the balance: the host drains the
     // buffer in well under 100 ms during an active read, so no handshake drops, yet a
     // single write can never block anywhere near the multi-second loop watchdog.
-    Port.setTxTimeoutMs(100);
+    Port.setTxTimeoutMs(SERIAL_TX_TIMEOUT_LOG_MS);
 #endif
 #if !ARCH_PORTDUINO
     emitRebooted();
+#endif
+}
+
+// Around the protobuf frame write (StreamAPI::emitTxBuffer) we raise the CDC TX timeout so
+// the frame blocks until fully sent instead of dropping bytes when the buffer is full of
+// pending log output. The host is actively reading during a session, so the buffer drains in
+// well under this bound — it only matters on a busy node whose log flood would otherwise
+// corrupt the config response and time out the handshake. Log writes keep the short timeout.
+void SerialConsole::beginReliableTx()
+{
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) ||                                                   \
+    defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    Port.setTxTimeoutMs(SERIAL_TX_TIMEOUT_PROTOBUF_MS);
+#endif
+}
+
+void SerialConsole::endReliableTx()
+{
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) ||                                                   \
+    defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    Port.setTxTimeoutMs(SERIAL_TX_TIMEOUT_LOG_MS);
 #endif
 }
 

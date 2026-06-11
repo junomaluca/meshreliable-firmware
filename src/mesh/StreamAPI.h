@@ -115,4 +115,14 @@ class StreamAPI : public PhoneAPI
 
   protected:
     concurrency::Lock streamLock;
+
+    /// Hooks around the protobuf frame write in emitTxBuffer(). A HWCDC-backed
+    /// subclass (SerialConsole) overrides these to make the frame write blocking
+    /// (reliable) so config/data frames are NEVER dropped when the CDC TX buffer
+    /// is full of pending log output. Plain-text log writes keep the short
+    /// non-blocking timeout (droppable, so a log flood can't stall the loop into
+    /// the task watchdog). Without this, a busy node's log flood drops the config
+    /// response during the handshake → host "Timed out waiting for connection".
+    virtual void beginReliableTx() {}
+    virtual void endReliableTx() {}
 };

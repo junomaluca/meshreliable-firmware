@@ -29,6 +29,13 @@ class SerialConsole : public StreamAPI, public RedirectablePrint, private concur
     void flush();
     void rxInt();
 
+    /// Make the protobuf frame write reliable on ESP32 USB-CDC: raise the TX timeout so
+    /// config/data frames block until sent (never dropped under log-flood), then restore the
+    /// short non-blocking timeout used for droppable log output. Fixes "Timed out waiting for
+    /// connection" when connecting to a busy node (e.g. the MQTT-gateway VHF T-Beam).
+    virtual void beginReliableTx() override;
+    virtual void endReliableTx() override;
+
   protected:
     /// Check the current underlying physical link to see if the client is currently connected
     virtual bool checkIsConnected() override;
