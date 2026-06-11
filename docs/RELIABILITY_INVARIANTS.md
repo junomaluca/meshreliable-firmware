@@ -69,6 +69,24 @@ cadence = reliability without saturating the band. The product owner explicitly 
 
 ## 4. Group-message reliability — 24 h per-member retry (policy "GRP-A")
 
+**Group text reaches ~100% (DM-grade) via FOUR pieces — do not remove any:**
+1. **Forward to phone** — `handleReceivedProtobuf` returns `false` (CONTINUE), not `true`
+   (STOP). Returning STOP *consumes* the packet so received group messages never reach the
+   app/phone (group text scored 0%, invisible in the app). MediaTransferModule returns false
+   for the same reason.
+2. **Deliver as N reliable unicasts** — `sendGroupText` sends each member a `want_ack`
+   unicast (routed end-to-end ACK + 24h retry), i.e. literally "group = N DMs". A broadcast
+   loses ~30% per member on first shot.
+3. **Reliable-unicast GROUP_ACK** — `sendAck` unicasts (want_ack) the ACK back to the original
+   sender, NOT a fire-and-forget broadcast; otherwise the sender can't confirm all-acked even
+   when delivery succeeded (capped success at ~p^N — e.g. 36% for a 3-node group).
+4. **Spacing matters** — a group message is N× a DM's airtime (N unicasts + N ACKs + retries),
+   so firing them in a tight burst saturates the LoRa channel (~80% delivery). At realistic
+   cadence (~10s+ between group messages) it is 100%. This is RF physics, not a protocol bug.
+
+Measured progression (3-node same-band 915 group, 25 msgs): 0% → 36% → ~90% → **100%** (spaced).
+
+
 **Files:** `src/modules/GroupMessageModule.h` / `.cpp`.
 **Invariant:** group messages are a **per-member-ACKed** protocol (recipient manifest +
 `GROUP_ACK` + `GROUP_ALL_ACKED`), NOT fire-and-forget. The retry schedule
