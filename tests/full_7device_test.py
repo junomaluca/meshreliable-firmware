@@ -1871,8 +1871,22 @@ class Full7DeviceTest:
         start_time = time.time()
         group_only = os.environ.get("GROUP_ONLY") == "1"
         media_only = os.environ.get("MEDIA_ONLY") == "1"
+        dm_only = os.environ.get("DM_ONLY") == "1"
 
         try:
+            if dm_only:
+                # DM-focused run: text + voice + image DMs only (all 3 message types).
+                log(f"\n{'='*70}\n  DM-ONLY RUN — text + voice + image DMs"
+                    f"  ({MEDIA_SEND_DELAY}s media spacing)\n{'='*70}")
+                for phase, fn in [("text_dm", self.run_phase_text_dm),
+                                  ("voice_dm", self.run_phase_voice_dm),
+                                  ("image_dm", self.run_phase_image_dm)]:
+                    fn()
+                    self._reconcile_phase(phase)
+                    self.print_summary()
+                    self._reset_phase()
+                return  # `finally` block generates the report
+
             if media_only:
                 # Media-focused run: voice + image DMs only (with retransmit + spacing).
                 log(f"\n{'='*70}\n  MEDIA-ONLY RUN — voice + image DMs"
