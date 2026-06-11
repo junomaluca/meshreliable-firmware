@@ -123,7 +123,12 @@ bool GroupMessageModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp,
         break;
     }
 
-    return true;
+    // Return CONTINUE (false), NOT STOP (true): we've done our group-protocol side-effects
+    // (ACK tracking, sending GROUP_ACK, etc.) above, but the packet must still be forwarded
+    // to the phone/app — otherwise received group messages are silently consumed and never
+    // appear in the app (and can't be measured). MediaTransferModule returns false for the
+    // same reason. ProtobufModule maps false -> ProcessMessage::CONTINUE -> phone gets it.
+    return false;
 }
 
 void GroupMessageModule::handleGroupText(const meshtastic_MeshPacket &mp, const meshtastic_GroupMessage &decoded)
