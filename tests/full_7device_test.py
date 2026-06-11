@@ -81,14 +81,21 @@ ALL_DEVICE_NAMES = list(USB_DEVICES.keys()) + list(REMOTE_DEVICES.keys())
 IOS_API_BASE = "http://192.168.1.187:8765"
 IOS_FALLBACK = "http://localhost:8765"
 
-MSGS_PER_PHASE = 25
+MSGS_PER_PHASE = int(os.environ.get("MSGS_PER_PHASE", "25"))
+# BAND_MULT: scale all serial/transfer timeouts. The 144 MHz tbeams (busy MQTT gateways) are
+# slow to service USB-RX under load (sends hang), so set BAND_MULT=10 for the 144-only test to
+# give transfers + hang-recovery far more headroom. (LoRa airtime itself is the same preset as
+# 915 — LONG_FAST — so this is about the USB-CDC/device-busy bottleneck, not radio data rate.)
+BAND_MULT = int(os.environ.get("BAND_MULT", "1"))
+# MEDIA_SIZE_CAP: cap synthetic media payload bytes (reduce data the tbeam must push/forward).
+MEDIA_SIZE_CAP = int(os.environ.get("MEDIA_SIZE_CAP", "0"))
 
-# Timing — keep realistic but not wasteful
-DM_TIMEOUT = 15          # seconds to wait for DM receipt
+# Timing — keep realistic but not wasteful (scaled by BAND_MULT for slow bands)
+DM_TIMEOUT = 15 * BAND_MULT          # seconds to wait for DM receipt
 MEDIA_CHUNK_DELAY = 8    # seconds between media chunks (< 8 causes serial port instability)
-MEDIA_ACK_TIMEOUT = 30   # seconds to wait for ACK_COMPLETE
+MEDIA_ACK_TIMEOUT = 30 * BAND_MULT   # seconds to wait for ACK_COMPLETE
 MEDIA_MAX_ATTEMPTS = 5   # retransmit the whole transfer up to this many times until ACK_COMPLETE
-MEDIA_ATTEMPT_TIMEOUT = 20  # seconds to wait for ACK_COMPLETE per attempt before retransmitting
+MEDIA_ATTEMPT_TIMEOUT = 20 * BAND_MULT  # seconds to wait for ACK_COMPLETE per attempt before retransmitting
 BROADCAST_TIMEOUT = 10   # seconds for broadcast verification
 INTER_MSG_DELAY = 1      # seconds between messages in a phase
 # MEDIA_SEND_DELAY: extra spacing between media transfers (media is many packets — like group,
@@ -98,14 +105,14 @@ MEDIA_SEND_DELAY = int(os.environ.get("MEDIA_SEND_DELAY", "2"))
 # e.g. "T3S3,XIAO,Pager" = 915-only; "VHF,BPF" = 144-only. Empty = no restriction.
 DM_TARGETS = set(t.strip() for t in os.environ.get("DM_TARGETS", "").split(",") if t.strip()) or None
 GROUP_MSG_WAIT = 10       # seconds to wait for group msg delivery
-SEND_HANG_TIMEOUT = 20   # seconds before a send() is treated as hung (e.g. wedged pager USB-TX)
+SEND_HANG_TIMEOUT = 20 * BAND_MULT   # seconds before a send() is treated as hung (e.g. wedged pager USB-TX)
 MAX_RECONNECTS = 4       # give up on a chronically-dropping device after this many reconnects/phase-run
 # Known-flaky USB ports to skip in discovery (device is on the mesh via radio, but its
 # USB-CDC handshake won't complete and floods parse errors that jam setup). VHF-A
 # (tbeam-s3-core, 1101) has a chronic CDC handshake issue post-factory-flash.
 import os as _os
 SKIP_USB_PORTS = set(_os.environ.get("SKIP_PORTS","/dev/cu.usbmodem1101").split(",")) if _os.environ.get("SKIP_PORTS") is not None else {"/dev/cu.usbmodem1101"}
-RETRY_RECONCILE_GRACE = 300  # DM-A: success measured 5 MIN after send (MeshReliable persistent retry).
+RETRY_RECONCILE_GRACE = min(300 * BAND_MULT, 600)  # DM-A grace; capped so a slow band can't hang 50 min
                              # After each phase, wait this long and upgrade messages the retries
                              # delivered after the per-message timeout. The last-sent message in a phase
                              # gets a full 5 min; earlier ones get phase-duration + 5 min.
@@ -880,6 +887,8 @@ class Full7DeviceTest:
     def _send_media(self, src, dst, content_type, size, phase="media"):
         """Send media transfer. content_type: 0=voice, 1=image, 3=warmup.
         Returns (transfer_id, success, latency)."""
+        if MEDIA_SIZE_CAP and content_type != 3:
+            size = min(size, MEDIA_SIZE_CAP)  # shrink payload to reduce data on slow/busy devices
         iface = self.interfaces.get(src)
         dest_id = self._get_dest_id(dst)
         if not iface or not dest_id:
