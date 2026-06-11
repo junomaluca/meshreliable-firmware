@@ -1005,16 +1005,24 @@ class Full7DeviceTest:
 
     def _group_success(self, tag, info=None):
         """A group message is delivered when every member online in the last 10 min (except
-        the sender) has ACKed it (GROUP_ACK), or — for USB members — its _on_rx saw the text."""
+        the sender) has RECEIVED it. We count two independent signals, whichever arrives:
+          1. the member's GROUP_ACK reached the sender (group_acks), AND
+          2. the member's own _on_rx actually showed the text (delivered_tags) — the direct
+             delivery observation, which survives even if the ACK round-trip was lost.
+        Using actual reception (not just the lossy ACK) avoids undercounting real deliveries."""
         meta = self.group_msg_meta.get(tag)
         if not meta:
             return False
         online = set(meta.get("online", set())) - {meta.get("src_id")}
         if not online:
             return True  # no other online members to deliver to
+        nm2id = {n: d.get("id") for n, d in self.all_devices.items()}
         delivered = set(self.group_acks.get(meta["msg_id"], set()))
+        # actual reception observed at each member (persistent across the whole run)
+        for rn in self.delivered_tags.get(tag, set()):
+            if nm2id.get(rn):
+                delivered.add(nm2id[rn])
         if info:
-            nm2id = {n: d.get("id") for n, d in self.all_devices.items()}
             for rn in info.get("received_by", set()):
                 if nm2id.get(rn):
                     delivered.add(nm2id[rn])
