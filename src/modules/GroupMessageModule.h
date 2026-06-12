@@ -74,6 +74,9 @@ class GroupMessageModule : private concurrency::OSThread, public ProtobufModule<
     // Compute group ID from channel index
     uint32_t getGroupIdForChannel(uint8_t channelIndex);
 
+    // Render a received group text on this device's own OLED/TFT (standalone, no app needed)
+    void renderGroupTextOnScreen(const meshtastic_MeshPacket &mp, const meshtastic_GroupMessage &decoded);
+
     // Handle incoming message types
     void handleGroupText(const meshtastic_MeshPacket &mp, const meshtastic_GroupMessage &decoded);
     void handleGroupAck(const meshtastic_MeshPacket &mp, const meshtastic_GroupMessage &decoded);

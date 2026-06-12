@@ -1,12 +1,19 @@
 #include "GroupMessageModule.h"
 #include <algorithm>
 #include "MeshService.h"
+#include "MessageStore.h"
 #include "NodeDB.h"
+#include "PowerFSM.h"
 #include "PowerStatus.h"
 #include "Router.h"
 #include "configuration.h"
 #include "gps/RTC.h"
+#include "graphics/Screen.h"
+#include "graphics/SharedUIDisplay.h"
+#include "graphics/draw/MessageRenderer.h"
+#include "main.h"
 #include "mesh/Channels.h"
+#include "meshUtils.h"
 
 // Battery-aware retry throttling
 static uint32_t getBatteryRetryMultiplier()
@@ -161,8 +168,41 @@ void GroupMessageModule::handleGroupText(const meshtastic_MeshPacket &mp, const 
     // Send ACK back to sender
     sendAck(mp.channel, decoded.message_id, decoded.group_id, mp.from);
 
+    // Render on this device's own screen so a standalone (no-app) device shows the group message.
+    renderGroupTextOnScreen(mp, decoded);
+
     // The text message content is available in decoded.text for the UI/client to display
     LOG_INFO("GroupMsg: ACKed message %u from 0x%08x", decoded.message_id, mp.from);
+}
+
+void GroupMessageModule::renderGroupTextOnScreen(const meshtastic_MeshPacket &mp, const meshtastic_GroupMessage &decoded)
+{
+    // The group payload is protobuf, not plain text, so the normal text display path can't read it
+    // directly. Synthesize a TEXT_MESSAGE_APP packet carrying the group text and feed it through the
+    // exact same store + render + wake path TextMessageModule uses, so the OLED/TFT shows it and the
+    // device wakes — identical behavior to receiving a normal text. Prefixed with "[grp]" so it is
+    // distinguishable from a DM/channel message on screen.
+    meshtastic_MeshPacket textMp = mp;
+    textMp.to = NODENUM_BROADCAST;
+    textMp.decoded.portnum = meshtastic_PortNum_TEXT_MESSAGE_APP;
+
+    char body[meshtastic_Constants_DATA_PAYLOAD_LEN];
+    snprintf(body, sizeof(body), "[grp] %s", decoded.text);
+    size_t blen = strnlen(body, sizeof(body) - 1);
+    memcpy(textMp.decoded.payload.bytes, body, blen);
+    textMp.decoded.payload.bytes[blen] = 0;
+    textMp.decoded.payload.size = blen;
+
+    IF_SCREEN(
+        // Skip on COLOR/MeshtasticUI builds (mirrors TextMessageModule's guard)
+        if (config.display.displaymode != meshtastic_Config_DisplayConfig_DisplayMode_COLOR) {
+            const StoredMessage &sm = messageStore.addFromPacket(textMp);
+            auto *display = screen ? screen->getDisplayDevice() : nullptr;
+            graphics::MessageRenderer::handleNewMessage(display, sm, textMp);
+        })
+    if (shouldWakeOnReceivedMessage()) {
+        powerFSM.trigger(EVENT_RECEIVED_MSG);
+    }
 }
 
 void GroupMessageModule::handleGroupAck(const meshtastic_MeshPacket &mp, const meshtastic_GroupMessage &decoded)
@@ -211,8 +251,23 @@ void GroupMessageModule::handleGroupJoin(const meshtastic_MeshPacket &mp, const 
 {
     LOG_INFO("GroupMsg: JOIN from 0x%08x, node=0x%08x, group=%u",
              mp.from, decoded.member_node_id, decoded.group_id);
-    // Group membership is managed by the sender's member list per message.
-    // JOIN/LEAVE are informational announcements for clients.
+
+    // Reliable join: a missed JOIN silently excludes a member from the group forever, so the sender
+    // retransmits until each member ACKs. If WE are a member of this group, ACK the invite (reliable
+    // unicast back to the sender) so the sender confirms us and stops retrying. Re-ACK on every copy
+    // received — a prior ACK may have been lost; the sender's tracker dedups acks idempotently.
+    uint32_t ourNode = nodeDB->getNodeNum();
+    bool isForUs = (decoded.members_count == 0);
+    for (uint8_t i = 0; i < decoded.members_count; i++) {
+        if (decoded.members[i] == ourNode) {
+            isForUs = true;
+            break;
+        }
+    }
+    if (isForUs) {
+        sendAck(mp.channel, decoded.message_id, decoded.group_id, mp.from);
+        LOG_INFO("GroupMsg: ACKed JOIN %u from 0x%08x", decoded.message_id, mp.from);
+    }
 }
 
 void GroupMessageModule::handleGroupLeave(const meshtastic_MeshPacket &mp, const meshtastic_GroupMessage &decoded)
