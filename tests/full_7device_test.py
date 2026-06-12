@@ -1110,133 +1110,35 @@ class Full7DeviceTest:
         # hybrid reliable-unicast retries land more ACKs.
         return self._group_success(tracking_tag, info)
 
+    def _send_group_media(self, src, content_type, phase):
+        """Group media (voice/image) = a reliable media DM to EACH LIVE member — i.e. group
+        media = N media DMs (the same lesson as group text = N DMs). Reuses _send_media, which
+        retransmits-until-ACK_COMPLETE, is wedge-resilient, and respects MEDIA_SIZE_CAP. Success
+        = every live member (online <10 min, except the sender) received it.
+        (The old path broadcast one transfer on ^all with no retransmit and counted a single
+        ACK_COMPLETE as success — lossy, and didn't verify all members.)"""
+        members = self._get_all_ids()
+        online = self._online_member_ids(members)
+        id2name = {d.get("id"): n for n, d in self.all_devices.items() if d.get("id")}
+        src_id = (self.all_devices.get(src) or {}).get("id")
+        targets = [m for m in online if m != src_id and id2name.get(m)]
+        if not targets:
+            return True  # no other live members to deliver to
+        ok = 0
+        for m in targets:
+            _, success, _ = self._send_media(src, id2name[m], content_type=content_type,
+                                             size=random.choice([50, 100]), phase=phase)
+            if success:
+                ok += 1
+        return ok == len(targets)
+
     def _send_group_voice(self, src, tracking_tag):
-        """Send voice memo as broadcast to group via media transfer."""
-        iface = self.interfaces.get(src)
-        if not iface:
-            return False
-
-        size = random.choice([50, 100])
-        data = bytes([(i * 37 + random.randint(0, 255)) & 0xFF for i in range(size)])
-        checksum = _crc32(data)
-        tid = random.randint(0x10000, 0xFFFFFFF)
-
-        start_pkt = bytearray()
-        start_pkt.extend(_fv(1, 1))
-        start_pkt.extend(_fv(2, tid))
-        start_pkt.extend(_fv(4, 1))
-        start_pkt.extend(_fv(5, size))
-        start_pkt.extend(_fv(7, 0))  # VOICE_MEMO
-        start_pkt.extend(_fv(9, checksum))
-        start_pkt.extend(_fb(10, "audio/codec2"))
-        start_pkt.extend(_fv(11, 3))
-
-        chunk_pkt = bytearray()
-        chunk_pkt.extend(_fv(2, tid))
-        chunk_pkt.extend(_fb(6, data))
-
-        complete_pkt = bytearray()
-        complete_pkt.extend(_fv(1, 2))
-        complete_pkt.extend(_fv(2, tid))
-        complete_pkt.extend(_fv(9, checksum))
-
-        ack_event = threading.Event()
-        with self.lock:
-            self.pending_ack[tid] = {
-                "event": ack_event, "result": None,
-                "time": time.time(), "rx_time": None,
-                "rssi": None, "snr": None, "hops_away": 0, "path": "radio",
-            }
-
-        try:
-            ch_idx = self.maluca_idx or 0
-            iface.sendData(bytes(start_pkt), destinationId="^all",
-                           portNum=PORTNUM_MEDIA, channelIndex=ch_idx,
-                           wantAck=False, wantResponse=False)
-            time.sleep(MEDIA_CHUNK_DELAY)
-            iface.sendData(bytes(chunk_pkt), destinationId="^all",
-                           portNum=PORTNUM_MEDIA, channelIndex=ch_idx,
-                           wantAck=False, wantResponse=False)
-            time.sleep(MEDIA_CHUNK_DELAY)
-            iface.sendData(bytes(complete_pkt), destinationId="^all",
-                           portNum=PORTNUM_MEDIA, channelIndex=ch_idx,
-                           wantAck=False, wantResponse=False)
-        except Exception as e:
-            with self.lock:
-                self.pending_ack.pop(tid, None)
-            return False
-
-        got = ack_event.wait(timeout=MEDIA_ACK_TIMEOUT)
-        with self.lock:
-            state = self.pending_ack.pop(tid, None)
-
-        return state and state["result"] == "ACK_COMPLETE"
+        """Group voice = reliable voice memo to each live member."""
+        return self._send_group_media(src, content_type=0, phase="group_voice")
 
     def _send_group_image(self, src, tracking_tag):
-        """Send image as broadcast to group via media transfer."""
-        iface = self.interfaces.get(src)
-        if not iface:
-            return False
-
-        size = random.choice([50, 100])
-        # Fake JPEG header
-        data = bytearray(b"\xFF\xD8\xFF\xE0")
-        data.extend(bytes([(i * 41) & 0xFF for i in range(size - 4)]))
-        data = bytes(data)
-        checksum = _crc32(data)
-        tid = random.randint(0x10000, 0xFFFFFFF)
-
-        start_pkt = bytearray()
-        start_pkt.extend(_fv(1, 1))
-        start_pkt.extend(_fv(2, tid))
-        start_pkt.extend(_fv(4, 1))
-        start_pkt.extend(_fv(5, size))
-        start_pkt.extend(_fv(7, 1))  # IMAGE_THUMBNAIL
-        start_pkt.extend(_fv(9, checksum))
-        start_pkt.extend(_fb(10, "image/jpeg"))
-        start_pkt.extend(_fv(12, 32))
-        start_pkt.extend(_fv(13, 32))
-
-        chunk_pkt = bytearray()
-        chunk_pkt.extend(_fv(2, tid))
-        chunk_pkt.extend(_fb(6, data))
-
-        complete_pkt = bytearray()
-        complete_pkt.extend(_fv(1, 2))
-        complete_pkt.extend(_fv(2, tid))
-        complete_pkt.extend(_fv(9, checksum))
-
-        ack_event = threading.Event()
-        with self.lock:
-            self.pending_ack[tid] = {
-                "event": ack_event, "result": None,
-                "time": time.time(), "rx_time": None,
-                "rssi": None, "snr": None, "hops_away": 0, "path": "radio",
-            }
-
-        try:
-            ch_idx = self.maluca_idx or 0
-            iface.sendData(bytes(start_pkt), destinationId="^all",
-                           portNum=PORTNUM_MEDIA, channelIndex=ch_idx,
-                           wantAck=False, wantResponse=False)
-            time.sleep(MEDIA_CHUNK_DELAY)
-            iface.sendData(bytes(chunk_pkt), destinationId="^all",
-                           portNum=PORTNUM_MEDIA, channelIndex=ch_idx,
-                           wantAck=False, wantResponse=False)
-            time.sleep(MEDIA_CHUNK_DELAY)
-            iface.sendData(bytes(complete_pkt), destinationId="^all",
-                           portNum=PORTNUM_MEDIA, channelIndex=ch_idx,
-                           wantAck=False, wantResponse=False)
-        except Exception as e:
-            with self.lock:
-                self.pending_ack.pop(tid, None)
-            return False
-
-        got = ack_event.wait(timeout=MEDIA_ACK_TIMEOUT)
-        with self.lock:
-            state = self.pending_ack.pop(tid, None)
-
-        return state and state["result"] == "ACK_COMPLETE"
+        """Group image = reliable image to each live member."""
+        return self._send_group_media(src, content_type=1, phase="group_image")
 
     # ─── Channel Broadcast ───────────────────────────────────────────
 
@@ -1923,17 +1825,27 @@ class Full7DeviceTest:
                 return  # `finally` block generates the report
 
             if group_only:
-                # Group-text-focused run: setup + group text only.
+                # Group-focused run: text + voice + image group messages. Success is measured
+                # for the LIVE members only (online in the last 10 min) via _group_success.
                 members = self._get_all_ids()
                 online = self._online_member_ids(members)
-                log(f"\n{'='*70}\n  GROUP-ONLY RUN — group text")
+                cats = os.environ.get("GROUP_CATEGORIES", "text,voice,image").split(",")
+                log(f"\n{'='*70}\n  GROUP-ONLY RUN — {','.join(cats)}")
                 log(f"  Members: {len(members)}  |  online (<10min): {len(online)} "
                     f"-> {[f'0x{m:08x}' for m in online]}\n{'='*70}")
+                group_phases = {"text": ("group_text", self.run_phase_group_text),
+                                "voice": ("group_voice", self.run_phase_group_voice),
+                                "image": ("group_image", self.run_phase_group_image)}
                 for _ in range(int(os.environ.get("GROUP_ROUNDS", "1"))):
-                    self.run_phase_group_text()
-                    self._reconcile_phase("group_text")
-                    self.print_summary()
-                    self._reset_phase()
+                    for c in cats:
+                        c = c.strip()
+                        if c not in group_phases:
+                            continue
+                        phase, fn = group_phases[c]
+                        fn()
+                        self._reconcile_phase(phase)
+                        self.print_summary()
+                        self._reset_phase()
                 return  # `finally` block generates the report
 
             # Phase 2: Text DMs
