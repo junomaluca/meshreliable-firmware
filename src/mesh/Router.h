@@ -60,6 +60,17 @@ class Router : protected concurrency::OSThread, protected PacketHistory
      */
     [[nodiscard]] meshtastic_MeshPacket *allocForSending();
 
+    /**
+     * MeshReliable: a want_ack BROADCAST (channel message) has no per-recipient routed ACK; its
+     * only confirmation is the sender overhearing a neighbor rebroadcast it, which frequently
+     * never reaches the sender (weak/asymmetric links, or the sender at the mesh edge), so the app
+     * shows "waiting to be acknowledged" forever even though the message was delivered. The honest
+     * status for a broadcast is "Sent" — and the device knows when it has sent (transmitted) the
+     * message — so we satisfy the pending ack at send time. No-op in the base; the reliable router
+     * implements it (it owns the pending table). Standard on all devices; unicast DMs unaffected.
+     */
+    virtual void generateBroadcastSentAck(const meshtastic_MeshPacket *p) {}
+
     /** Return Underlying interface's TX queue status */
     [[nodiscard]] meshtastic_QueueStatus getQueueStatus();
 

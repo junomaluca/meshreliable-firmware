@@ -87,6 +87,13 @@ ErrorCode ReliableRouter::send(meshtastic_MeshPacket *p)
         }
     }
 
+    // MeshReliable: for our own want_ack BROADCAST (channel message), ack now on transmit — a
+    // broadcast has no per-recipient ACK and often never hears its own rebroadcast back, so this
+    // shows "Sent" instead of leaving it "waiting to be acknowledged" forever. The pending entry
+    // we just added (above) is removed so we don't keep retransmitting it. Unicast DMs unaffected.
+    if (p->want_ack && isBroadcast(p->to) && getFrom(p) == getNodeNum())
+        generateBroadcastSentAck(p);
+
     return isBroadcast(p->to) ? FloodingRouter::send(p) : NextHopRouter::send(p);
 }
 
@@ -129,6 +136,28 @@ bool ReliableRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
     }
 
     return isBroadcast(p->to) ? FloodingRouter::shouldFilterReceived(p) : NextHopRouter::shouldFilterReceived(p);
+}
+
+// MeshReliable: satisfy a pending want_ack BROADCAST (channel message) ack at SEND time. A
+// broadcast has no per-recipient routed ACK; its only confirmation is overhearing a neighbor
+// rebroadcast it (see shouldFilterReceived above), which frequently never reaches the sender
+// (weak/asymmetric links — e.g. the Pager's LR1121 to 915 SX1262 peers — or the sender at the
+// mesh edge). So the sender's app shows "waiting to be acknowledged" forever even though the
+// message was transmitted (and usually delivered). The honest status for a broadcast is "Sent",
+// and the device knows when it has sent the message, so generate the implicit ack now. Called
+// from ReliableRouter::send for our own broadcasts; standard on all devices. Unicast DMs are
+// unaffected — they still wait for a real routed ACK from the recipient.
+void ReliableRouter::generateBroadcastSentAck(const meshtastic_MeshPacket *p)
+{
+    if (!p || !isBroadcast(p->to) || !p->want_ack || getFrom(p) != getNodeNum())
+        return;
+    auto key = GlobalPacketId(getFrom(p), p->id);
+    auto old = findPendingPacket(key);
+    if (old) {
+        LOG_DEBUG("Broadcast sent-ack id=0x%08x (channel msg has no per-recipient ack)", p->id);
+        sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, old->packet->channel);
+        stopRetransmission(key);
+    }
 }
 
 /**

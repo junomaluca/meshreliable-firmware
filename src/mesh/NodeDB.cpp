@@ -1525,21 +1525,60 @@ void NodeDB::eraseNodeSatellites(NodeNum n)
 
 void NodeDB::cleanupMeshDB()
 {
+    const NodeNum ourNum = getNodeNum();
+    const uint32_t now = getTime();              // epoch seconds (small/unreliable before we have a clock)
+    const uint32_t THREE_DAYS = 3u * 24 * 60 * 60;
+    const bool timeValid = now > THREE_DAYS;     // only age-purge once we actually have a real clock
+
+    // Pass 1: decide keep/drop over the ORIGINAL list (read-only) so the de-dup comparisons see
+    // consistent data. Rules (MeshReliable):
+    //   - drop nodes with no user info (upstream behaviour)
+    //   - drop nodes not heard for 3+ days, UNLESS favorite
+    //   - de-dup by long_name: a reflashed device keeps its name but gets a NEW node number,
+    //     leaving a stale duplicate in everyone's list — keep only the most-recently-heard
+    //     same-name node and drop the older one EVEN IF it is a favorite.
+    // Our own node is never dropped.
+    std::vector<bool> keep((size_t)numMeshNodes, true);
+    for (int i = 0; i < numMeshNodes; i++) {
+        meshtastic_NodeInfoLite &n = meshNodes->at(i);
+        if (!nodeInfoLiteHasUser(&n)) {
+            keep[i] = false;
+            continue;
+        }
+        if (n.num == ourNum)
+            continue;
+        if (!nodeInfoLiteIsFavorite(&n) && timeValid && n.last_heard != 0 && (now - n.last_heard) > THREE_DAYS) {
+            keep[i] = false;
+            continue;
+        }
+        if (n.long_name[0]) {
+            for (int j = 0; j < numMeshNodes; j++) {
+                if (j == i)
+                    continue;
+                meshtastic_NodeInfoLite &m = meshNodes->at(j);
+                if (m.num == ourNum || !nodeInfoLiteHasUser(&m) || m.long_name[0] == '\0')
+                    continue;
+                if (strncmp(m.long_name, n.long_name, sizeof(n.long_name)) == 0 &&
+                    (n.last_heard < m.last_heard || (n.last_heard == m.last_heard && i > j))) {
+                    keep[i] = false; // n is the older (or tie-loser) same-name duplicate
+                    break;
+                }
+            }
+        }
+    }
+
+    // Pass 2: compact, dropping the !keep entries.
     int newPos = 0, removed = 0;
     for (int i = 0; i < numMeshNodes; i++) {
         meshtastic_NodeInfoLite &n = meshNodes->at(i);
-        if (nodeInfoLiteHasUser(&n)) {
-            if (n.public_key.size > 0) {
-                if (memfll(n.public_key.bytes, 0, n.public_key.size)) {
-                    n.public_key.size = 0;
-                }
-            }
+        if (keep[i]) {
+            if (n.public_key.size > 0 && memfll(n.public_key.bytes, 0, n.public_key.size))
+                n.public_key.size = 0;
             if (newPos != i)
                 meshNodes->at(newPos++) = n;
             else
                 newPos++;
         } else {
-            // No user info - drop this node and its satellites
             const NodeNum gone = n.num;
             if (gone)
                 eraseNodeSatellites(gone);
@@ -1549,7 +1588,7 @@ void NodeDB::cleanupMeshDB()
     numMeshNodes -= removed;
     std::fill(nodeDatabase.nodes.begin() + numMeshNodes, nodeDatabase.nodes.begin() + numMeshNodes + removed,
               meshtastic_NodeInfoLite());
-    LOG_DEBUG("cleanupMeshDB purged %d entries", removed);
+    LOG_DEBUG("cleanupMeshDB purged %d entries (incl. dedup-by-name + 3d-offline)", removed);
 }
 
 void NodeDB::installDefaultDeviceState()

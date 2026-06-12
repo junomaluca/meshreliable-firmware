@@ -21,6 +21,10 @@ class ReliableRouter : public NextHopRouter
      */
     virtual ErrorCode send(meshtastic_MeshPacket *p) override;
 
+    /// MeshReliable: satisfy a pending want_ack broadcast's ack at send time (a broadcast has no
+    /// per-recipient ACK and often never hears its rebroadcast). See Router::generateBroadcastSentAck.
+    virtual void generateBroadcastSentAck(const meshtastic_MeshPacket *p) override;
+
   protected:
     /**
      * Look for acks/naks or someone retransmitting us
